@@ -215,12 +215,17 @@ Low confidence never becomes confident prose: it becomes a question.
   changed files:
   ├─ same name+path, new hash  modified
   ├─ equal hash elsewhere      renamed/moved  (Tier 0)
-  ├─ similarity ≥ 0.6          renamed/moved  (Tier 1)
+  ├─ similarity ≥ 0.7          renamed/moved  (Tier 1)
+  │  of meaningful tokens,
+  │  both bodies ≥ 6 of them
   ├─ two within 0.05           ambiguous: shown, not decided
   └─ otherwise                 added / removed
 ```
 
-Lineage walks history newest-first and follows `from` links. An ambiguous
+A merge commit records only files that differ from every parent (as
+`git diff --cc` sees them), so a merged branch's events are not repeated.
+Lineage walks history newest-first in topological order and follows `from`
+links. An ambiguous
 succession is followed only after `git sem entity confirm` records an
 authored `entity-link`. `why` keeps only intents that are authored, or
 inferred with confidence ≥ 0.5 from a commit that added fewer than 10
@@ -237,7 +242,9 @@ entities, and reports "insufficient" otherwise.
   commit docs   intent + subject
   entity docs   split name + intent
                 + body
-       │  512-dim feature hashing
+       │  split identifiers, light
+       │  stemming, 512-dim
+       │  feature hashing
        ▼
   cosine ranking, best version
   per entity, labeled with
@@ -252,9 +259,11 @@ top of that:
 
 - `merge-view` keeps entities both sides touched and compares the sides'
   intents with the Tier 1 embedding (≥ 0.4 means likely redundant).
-- `check` applies Tier 0 rules: duplicate definitions in different files,
-  and renames or removals that the other side still adds uses of (`git log -G`
-  plus a check of added lines).
+- `check` applies Tier 0 rules: duplicate definitions of an exported name in
+  different files of the same language (tests excluded), and renames or
+  removals that the other side still adds uses of (`git log -S`, a plain
+  string match that behaves the same on every platform, then a word-boundary
+  check of added lines in TypeScript).
 - `resolve` asks the engine for file contents and stores the proposal under
   `.git/sem/proposals`; `--accept` writes it only if the conflict has not
   changed, and never stages it.
@@ -297,9 +306,12 @@ before and after a command, so they test behavior rather than implementation.
 - **Entity extraction is pattern-based.** It covers common declarations in
   TS/JS, Python, Go and Rust, not every syntax. A tree-sitter extractor can
   replace it behind the same `extractEntities` signature.
-- **Search is lexical.** The Tier 1 embedding matches words, split
+- **Search is lexical.** The Tier 1 embedding matches stemmed words, split
   identifiers and character trigrams, not concepts. A model-backed embedder
   can replace `embed()`.
+- **`check` does not scope by package.** Two packages in one repository can
+  still both export the same name and warn; scoping by the nearest
+  `package.json`, `go.mod` or `pyproject.toml` is the next step.
 - **The search index rebuilds fully** when the notes move. Fine for
   thousands of commits; very large histories want incremental updates.
 - **Reversal detection is exact.** Partial undos are left to the engine,

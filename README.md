@@ -61,7 +61,7 @@ In any repository:
 
 ```sh
 git sem init               # installs the post-commit and post-merge hooks
-git sem init --backfill    # ...and indexes existing history in the background
+git sem init --backfill    # ...and indexes every branch and tag in the background
 ```
 
 ## Usage
@@ -85,7 +85,8 @@ git sem entity confirm <commit> fetchUser loadUser   # settle an ambiguity
 
 Entities are functions, classes, methods and types in TypeScript/JavaScript,
 Python, Go and Rust. A pure rename or move links exactly (Tier 0); a rename
-with edits links by similarity (Tier 1). When two new entities match equally
+with edits links by similarity (Tier 1), but only when both bodies are big
+enough to tell apart. When two new entities match equally
 well, git-sem shows both and waits for you to confirm.
 
 `why` answers only from intents that are authored by a person or proposed
@@ -144,8 +145,9 @@ git sem resolve <path>            # propose a resolution for a conflicted file
 git sem resolve <path> --accept   # write it (you still stage it)
 ```
 
-`check` warns when both sides define the same entity in different files, or
-when one side renames or removes something the other side starts using.
+`check` warns when both sides export the same name from different files of
+the same language, or when one side renames or removes something the other
+side starts using.
 Warnings never block. When you merge anyway, the merge commit records that
 decision and who made it.
 
@@ -234,6 +236,12 @@ for a local model.
 | `sem.frontier.command` | — | Tier 3 engine command (used only on request) |
 | `sem.frontier.model` | — | Tier 3 model id |
 | `sem.frontier.dailyBudget` | unlimited | Maximum Tier 3 calls per day |
+
+## Upgrading
+
+0.2 changed how entity events are recorded (merges no longer repeat their
+branch's changes). After upgrading, run `git sem index --all` once to store
+the corrected events. Until then they are recomputed on the fly when read.
 
 ## Performance
 
