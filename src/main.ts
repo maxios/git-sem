@@ -4,6 +4,7 @@ import { indexCommand } from "./commands/index-cmd.ts";
 import { initCommand } from "./commands/init.ts";
 import { intentCommand } from "./commands/intent.ts";
 import { logCommand } from "./commands/log.ts";
+import { rebuildCommand, searchCommand, similarCommand } from "./commands/search.ts";
 import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
 import { fetchCommand, pushCommand } from "./commands/sync.ts";
@@ -43,6 +44,12 @@ entities (functions, classes, methods)
                            settle an ambiguous succession
   why <name>               why it exists, from recorded intents only
 
+search (local index, Tier 1, no model)
+  search <query>           find code and commits by meaning on every branch
+    --include-unreachable  also show results only kept alive by the reflog
+  similar <entity>         entities that look like this one
+  rebuild                  recreate the local index from refs/notes/sem
+
 judgment (yours)
   commit                   commit with a history-aware draft in your editor
     --no-edit              commit the draft as is
@@ -66,6 +73,9 @@ const COMMANDS: Record<string, Command> = {
   commit: commitCommand,
   entity: entityCommand,
   why: whyCommand,
+  search: searchCommand,
+  similar: similarCommand,
+  rebuild: rebuildCommand,
   index: indexCommand,
   log: logCommand,
   show: showCommand,
