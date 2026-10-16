@@ -146,3 +146,14 @@ step("I run {string}", async (w: World, command: string) => {
   const r = await w.record(command, () => w.exec(command));
   if (r.code !== 0) throw new Error(`"${command}" exited ${r.code}\n${r.stderr || r.stdout}`);
 });
+
+step("branch {string} has {int} commits with intents", async (w: World, branch: string, n: number) => {
+  await w.git(["checkout", "--quiet", "-b", branch]);
+  for (let i = 1; i <= n; i++) {
+    await touch(w, `src/timeouts/step${i}.ts`);
+    await commit(w, `Timeout step ${i}`);
+  }
+  await w.git(["checkout", "--quiet", "main"]);
+  const r = await w.exec("git sem index");
+  if (r.code !== 0) throw new Error(r.stderr);
+});

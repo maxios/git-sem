@@ -4,6 +4,7 @@ import { indexCommand } from "./commands/index-cmd.ts";
 import { initCommand } from "./commands/init.ts";
 import { intentCommand } from "./commands/intent.ts";
 import { logCommand } from "./commands/log.ts";
+import { mcpCommand } from "./commands/mcp.ts";
 import { checkCommand, mergeViewCommand, resolveCommand } from "./commands/merge.ts";
 import { rebuildCommand, searchCommand, similarCommand } from "./commands/search.ts";
 import { showCommand } from "./commands/show.ts";
@@ -11,7 +12,7 @@ import { statusCommand } from "./commands/status.ts";
 import { fetchCommand, pushCommand } from "./commands/sync.ts";
 import { messageOf, UserError } from "./errors.ts";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 const HELP = `git-sem ${VERSION} — a semantic layer over git
 
@@ -60,6 +61,14 @@ judgment (yours)
   intent [<rev>]           show the current intent
   intent <rev> --set TEXT  record your own intent
   intent <rev> --accept    adopt the inferred proposal as yours
+  intent --branch <name>   one intent for a whole branch (--base <ref>)
+
+agents
+  intent <rev> --propose TEXT --agent ID
+                           record an agent's proposal (stays a proposal)
+  intent <rev> --accept --agent ID
+                           adopt that agent's proposal as yours
+  mcp                      MCP server on stdio for agents
 
 merging (you decide; nothing is merged for you)
   merge-view <a> <b>       entities both sides changed, with each side's intent
@@ -87,6 +96,7 @@ const COMMANDS: Record<string, Command> = {
   "merge-view": mergeViewCommand,
   resolve: resolveCommand,
   check: checkCommand,
+  mcp: mcpCommand,
   index: indexCommand,
   log: logCommand,
   show: showCommand,

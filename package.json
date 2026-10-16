@@ -1,6 +1,6 @@
 {
   "name": "git-sem",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A semantic layer over git: inference at write time, lookup at read time.",
   "type": "module",
   "private": true,

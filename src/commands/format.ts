@@ -15,6 +15,7 @@ export function provenanceLine(r: ArtifactRecord): string {
 
 export function intentBadge(r: Pick<ArtifactRecord, "source" | "engine" | "model" | "confidence">): string {
   if (r.source === "authored") return "[authored]";
+  if (r.engine === "agent") return `[proposed by agent ${r.model} · ${r.confidence.toFixed(2)}]`;
   return `[inferred ${r.model === "none" ? r.engine : r.model} · ${r.confidence.toFixed(2)}]`;
 }
 

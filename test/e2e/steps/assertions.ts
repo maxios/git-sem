@@ -85,6 +85,10 @@ step("the engine has not been invoked", async (w: World) => {
   expect(await w.engineCalls()).toBe(0);
 });
 
+step("the engine has been invoked {int} time(s)", async (w: World, n: number) => {
+  expect(await w.engineCalls()).toBe(n);
+});
+
 step("the last command did not invoke the engine", (w: World) => {
   const r = last(w);
   expect(r.engineCallsAfter - r.engineCallsBefore).toBe(0);

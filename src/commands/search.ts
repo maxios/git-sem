@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { UserError } from "../errors.ts";
-import { openRepo } from "../repo.ts";
+import { openRepo, type Repo } from "../repo.ts";
 import { reachability, SearchIndex, type Hit } from "../search-index.ts";
 import { short } from "./format.ts";
 
@@ -13,6 +13,28 @@ export interface SearchResult extends Omit<Hit, "text"> {
 function label(r: SearchResult): string {
   if (r.reach === "reachable") return `[${r.branches.join(", ")}]`;
   return r.reach === "reflog" ? "[unreachable · reflog]" : "[unreachable]";
+}
+
+export async function runSearch(
+  repo: Repo,
+  query: string,
+  opts: { includeUnreachable?: boolean; limit?: number } = {},
+): Promise<{ results: SearchResult[]; index: string; rebuilt: boolean }> {
+  const limit = opts.limit ?? 10;
+  const { index, rebuilt } = await SearchIndex.open(repo);
+  const hits = index.search(query, limit * 3);
+  index.close();
+
+  const reach = await reachability(repo.git);
+  const results: SearchResult[] = hits
+    .map(({ text: _text, ...h }) => {
+      const branches = reach.branches.get(h.commit) ?? [];
+      const where: SearchResult["reach"] = branches.length ? "reachable" : reach.reflog.has(h.commit) ? "reflog" : "unreachable";
+      return { ...h, branches, reach: where };
+    })
+    .filter((r) => opts.includeUnreachable || r.reach === "reachable")
+    .slice(0, limit);
+  return { results, index: index.path, rebuilt };
 }
 
 /**
@@ -34,23 +56,13 @@ export async function searchCommand(args: string[]): Promise<number> {
   if (!query) throw new UserError("usage: git sem search <query>");
 
   const repo = await openRepo();
-  const { index, rebuilt } = await SearchIndex.open(repo);
-  const limit = Number(values.limit ?? 10);
-  const hits = index.search(query, limit * 3);
-  index.close();
-
-  const reach = await reachability(repo.git);
-  const results: SearchResult[] = hits
-    .map(({ text: _text, ...h }) => {
-      const branches = reach.branches.get(h.commit) ?? [];
-      const where: SearchResult["reach"] = branches.length ? "reachable" : reach.reflog.has(h.commit) ? "reflog" : "unreachable";
-      return { ...h, branches, reach: where };
-    })
-    .filter((r) => values["include-unreachable"] || r.reach === "reachable")
-    .slice(0, limit);
+  const { results, index, rebuilt } = await runSearch(repo, query, {
+    includeUnreachable: values["include-unreachable"],
+    limit: Number(values.limit ?? 10),
+  });
 
   if (values.json) {
-    console.log(JSON.stringify({ query, tier: 1, source: "local-index", index: index.path, rebuilt, results }, null, 2));
+    console.log(JSON.stringify({ query, tier: 1, source: "local-index", index, rebuilt, results }, null, 2));
     return 0;
   }
   if (results.length === 0) {

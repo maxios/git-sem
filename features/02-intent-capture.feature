@@ -28,8 +28,10 @@ Feature: Intent capture
     When I run "git sem intent HEAD --accept"
     Then HEAD shows an authored intent starting with "[m1]"
 
-  @wip
   Scenario: Intent rolls up to the branch
-    Given branch "feature/timeouts" has 5 commits with intents
-    When I run "git sem intent --branch"
-    Then I see a single branch-level intent summarizing them
+    Given I commit a change to "README.md" with message "Start"
+    And branch "feature/timeouts" has 5 commits with intents
+    When I run "git sem intent --branch feature/timeouts --base main"
+    Then the output contains "Branch intent: [m1] summary of 5 intents"
+    And the output contains "5 commits, 5 with intents"
+    And the last command invoked the engine 1 time
