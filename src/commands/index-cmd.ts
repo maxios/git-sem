@@ -13,9 +13,21 @@ import { Queue } from "../queue.ts";
 import { openRepo, type Repo } from "../repo.ts";
 import { short } from "./format.ts";
 
+/** `--` ends the revisions, so a branch named like a directory is never read as a path. */
 export async function revList(git: Git, args: string[]): Promise<string[]> {
-  const out = await git.out(["rev-list", "--reverse", ...args]);
+  const out = await git.out(["rev-list", "--reverse", ...args, "--"]);
   return out ? out.split("\n") : [];
+}
+
+/**
+ * Every commit worth indexing: all local branches and tags, plus HEAD when
+ * detached. Not just HEAD's ancestry, or other worlds stay invisible to
+ * entity --worlds, check, merge-view and search.
+ */
+export async function wholeHistory(git: Git): Promise<string[]> {
+  const tips = ["--branches", "--tags"];
+  if (await git.resolve("HEAD")) tips.push("HEAD");
+  return revList(git, tips);
 }
 
 async function drain(queue: Queue, indexer: Indexer, total: IndexStats, progress: Progress): Promise<void> {
@@ -67,7 +79,7 @@ export async function indexCommand(args: string[]): Promise<number> {
   const lockPath = join(repo.semDir, "index.lock");
 
   let explicit: string[] | undefined;
-  if (values.all) explicit = await revList(repo.git, ["HEAD"]);
+  if (values.all) explicit = await wholeHistory(repo.git);
   else if (values.since) explicit = await revList(repo.git, [`${values.since}..HEAD`]);
   if (values.rev?.length) explicit = [...(explicit ?? []), ...values.rev];
 

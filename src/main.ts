@@ -23,13 +23,13 @@ usage: git sem <command> [options]
 
 setup
   init                     install the post-commit hook and notes config
-    --backfill             also index existing history in the background
+    --backfill             also index all branches and tags in the background
 
 write side (background)
   index                    index queued commits
     --rev <rev>            index specific commits (repeatable)
     --since <rev>          index commits in <rev>..HEAD
-    --all                  index every commit reachable from HEAD
+    --all                  index every commit on every branch and tag
     --background           queue the targets and return immediately
     --json | --quiet
 

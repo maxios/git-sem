@@ -24,3 +24,15 @@ Feature: Adopt an existing project
     When I run "git sem init --backfill"
     Then git sem status eventually reports indexing progress out of 5
     And every commit on the current branch eventually has an intent
+
+  Scenario: Backfill covers every branch, not just HEAD
+    Given branch "topic" adds "src/topic.ts" with a function "topicWork"
+    When I run "git sem init --backfill"
+    Then every commit on branch "topic" eventually has an intent
+
+  Scenario: index --all covers every branch
+    Given branch "topic" adds "src/topic.ts" with a function "topicWork"
+    And I run "git sem init"
+    And background indexing is disabled
+    When I run "git sem index --all"
+    Then every commit on branch "topic" has an intent

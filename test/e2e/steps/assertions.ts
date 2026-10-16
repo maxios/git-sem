@@ -120,6 +120,19 @@ step("the latest commit is eventually indexed", async (w: World) => {
   await eventually("HEAD to be indexed", async () => (await w.sem<ShowJson>("show HEAD")).intent !== null);
 });
 
+step("every commit on branch {string} has an intent", async (w: World, branch: string) => {
+  const log = await w.sem<LogEntry[]>(`log ${branch}`);
+  expect(log.length).toBeGreaterThan(1);
+  for (const entry of log) expect(entry.intent).not.toBeNull();
+});
+
+step("every commit on branch {string} eventually has an intent", async (w: World, branch: string) => {
+  await eventually(`every commit on ${branch} to have an intent`, async () => {
+    const log = await w.sem<LogEntry[]>(`log ${branch}`);
+    return log.length > 1 && log.every((e) => e.intent !== null);
+  });
+});
+
 step("every commit on the current branch eventually has an intent", async (w: World) => {
   await eventually("every commit to have an intent", async () => {
     const log = await w.sem<LogEntry[]>("log");

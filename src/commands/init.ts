@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { parseArgs } from "node:util";
 import { openRepo } from "../repo.ts";
-import { enqueueInBackground, revList } from "./index-cmd.ts";
+import { enqueueInBackground, wholeHistory } from "./index-cmd.ts";
 
 export const HOOK_BEGIN = "# >>> git-sem >>>";
 export const HOOK_END = "# <<< git-sem <<<";
@@ -57,7 +57,7 @@ export async function initCommand(args: string[]): Promise<number> {
   state    ${repo.semDir}`);
 
   if (values.backfill) {
-    const history = (await repo.git.resolve("HEAD")) ? await revList(repo.git, ["HEAD"]) : [];
+    const history = await wholeHistory(repo.git);
     if (history.length === 0) {
       console.log("  backfill nothing to index yet");
     } else {
