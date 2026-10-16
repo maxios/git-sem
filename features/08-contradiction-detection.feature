@@ -38,3 +38,35 @@ Feature: Detect semantic contradictions in clean merges
     Then the merge completes
     When I run "git sem index"
     Then the merge commit records that it was merged despite 1 warning
+
+  Scenario: The same name in different languages is not a conflict
+    Given on branch "a" I commit "go/api.go" containing:
+      """
+      package api
+
+      type LocalTime struct{}
+      """
+    And on branch "b" I commit "web/time.ts" containing:
+      """
+      export type LocalTime = string
+      """
+    And I run "git sem index --all"
+    When I run "git sem check a b"
+    Then the output contains "No contradictions found"
+
+  Scenario: Private helpers with the same name are not a conflict
+    Given on branch "a" I commit "src/auth/util.ts" containing:
+      """
+      function normalize(value: string) {
+        return value.trim().toLowerCase();
+      }
+      """
+    And on branch "b" I commit "src/cache/util.ts" containing:
+      """
+      function normalize(key: string) {
+        return key.replace(/\s+/g, "-");
+      }
+      """
+    And I run "git sem index --all"
+    When I run "git sem check a b"
+    Then the output contains "No contradictions found"

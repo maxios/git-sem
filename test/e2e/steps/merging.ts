@@ -48,6 +48,10 @@ step("on branch {string} I commit {string} with a function {string} and message 
   await onBranch(w, branch, message, () => write(w, path, fn(name)));
 });
 
+step("on branch {string} I commit {string} containing:", async (w: World, branch: string, path: string, content: string) => {
+  await onBranch(w, branch, `Add ${path}`, () => write(w, path, `${content}\n`));
+});
+
 step("on branch {string} I rename the function {string} to {string} in place", async (w: World, branch: string, from: string, to: string) => {
   await onBranch(w, branch, `Rename ${from} to ${to}`, () => edit(w, pathOf(w, from), (s) => s.replace(`function ${from}(`, `function ${to}(`)));
 });

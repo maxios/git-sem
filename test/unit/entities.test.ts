@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { diffEntities, extractEntities } from "../../src/entities.ts";
+import { diffEntities, extractEntities, familyOf, isTestPath, similarity } from "../../src/entities.ts";
 
 const USER_TS = `import { db } from "./db";
 
@@ -76,7 +76,7 @@ describe("diffEntities", () => {
   test("a pure rename across files is an exact Tier 0 link", () => {
     const events = diffEntities([{ path: "api/user.ts", content: body("fetchUser") }], [{ path: "services/user.ts", content: body("loadUser") }]);
     expect(events).toEqual([
-      { type: "renamed", name: "loadUser", path: "services/user.ts", from: { name: "fetchUser", path: "api/user.ts" }, score: 1, tier: 0 },
+      { type: "renamed", name: "loadUser", path: "services/user.ts", exported: true, from: { name: "fetchUser", path: "api/user.ts" }, score: 1, tier: 0 },
     ]);
   });
 
@@ -107,6 +107,51 @@ describe("diffEntities", () => {
 
   test("an edit in place is modified", () => {
     const events = diffEntities([{ path: "a.ts", content: body("f") }], [{ path: "a.ts", content: body("f").replace("null", "undefined") }]);
-    expect(events).toEqual([{ type: "modified", name: "f", path: "a.ts", tier: 0 }]);
+    expect(events).toEqual([{ type: "modified", name: "f", path: "a.ts", exported: true, tier: 0 }]);
+  });
+
+  test("unrelated short functions are not linked as renames (#4)", () => {
+    const events = diffEntities(
+      [{ path: "a.ts", content: "export function count(xs) {\n  return xs.length\n}\n" }],
+      [{ path: "b.ts", content: "export function width(box) {\n  return box.left\n}\n" }],
+    );
+    expect(events.map((e) => `${e.type}:${e.name}`).sort()).toEqual(["added:width", "removed:count"]);
+  });
+
+  test("a short function that is renamed unchanged still links exactly", () => {
+    const events = diffEntities(
+      [{ path: "a.ts", content: "export function count(xs) {\n  return xs.length\n}\n" }],
+      [{ path: "a.ts", content: "export function size(xs) {\n  return xs.length\n}\n" }],
+    );
+    expect(events).toMatchObject([{ type: "renamed", name: "size", from: { name: "count" }, tier: 0 }]);
+  });
+
+  test("similarity ignores syntax and keywords", () => {
+    const a = "function a(x) { if (x) { return this.y; } return null; }";
+    const b = "function b(z) { if (z) { return this.w; } return null; }";
+    expect(similarity(a, "a", b, "b")).toBe(0);
+  });
+});
+
+describe("export and language awareness (#3)", () => {
+  test("exported entities per language", () => {
+    const exported = (path: string, src: string) => extractEntities(path, src).map((e) => `${e.name}:${e.exported}`);
+    expect(exported("a.ts", "export function a() {}\nfunction b() {}\nexport class C {\n  run() {\n  }\n  private hide() {\n  }\n}\n")).toEqual([
+      "a:true",
+      "b:false",
+      "C:true",
+      "C.run:true",
+      "C.hide:false",
+    ]);
+    expect(exported("a.go", "func Load() {\n}\nfunc load() {\n}\n")).toEqual(["Load:true", "load:false"]);
+    expect(exported("a.py", "def run():\n    pass\ndef _helper():\n    pass\n")).toEqual(["run:true", "_helper:false"]);
+    expect(exported("a.rs", "pub fn a() {\n}\nfn b() {\n}\n")).toEqual(["a:true", "b:false"]);
+  });
+
+  test("language families and test paths", () => {
+    expect(familyOf("web/time.ts")).toBe(familyOf("web/time.jsx"));
+    expect(familyOf("web/time.ts")).not.toBe(familyOf("go/api.go"));
+    expect(["src/a.test.ts", "tests/x.py", "pkg/a_test.go", "__tests__/a.js"].every(isTestPath)).toBe(true);
+    expect(["src/a.ts", "src/testing.ts", "pkg/a.go"].some(isTestPath)).toBe(false);
   });
 });

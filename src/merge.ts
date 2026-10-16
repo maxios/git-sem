@@ -1,7 +1,7 @@
 import { parseNote, resolveIntent, type EngineIdentity, type Source } from "./artifacts.ts";
 import { CatFile } from "./batch.ts";
 import { cosine, embed } from "./embed.ts";
-import { languageOf, type EntityEvent } from "./entities.ts";
+import { familyOf, isTestPath, languageOf, type EntityEvent } from "./entities.ts";
 import { commitsWithNotes, eventsForCommit } from "./entity-git.ts";
 import type { Git } from "./git.ts";
 
@@ -104,6 +104,20 @@ export interface Warning {
 }
 
 const DEFINED = new Set(["added", "renamed", "moved"]);
+
+/**
+ * Two definitions of one name only compete when they could meet: different
+ * files of the same language, both visible outside their file, and neither
+ * in tests. A Go type and a TypeScript type with the same name never
+ * collide, and neither do two private helpers (#3).
+ */
+function canCollide(a: EntityEvent, b: EntityEvent): boolean {
+  if (a.path === b.path) return false;
+  const family = familyOf(a.path);
+  if (!family || family !== familyOf(b.path)) return false;
+  if (a.exported === false || b.exported === false) return false;
+  return !isTestPath(a.path) && !isTestPath(b.path);
+}
 const GONE = new Set(["removed", "renamed", "moved"]);
 
 function shortName(name: string): string {
@@ -159,7 +173,7 @@ export async function findContradictions(git: Git, sides: Sides): Promise<Warnin
     if (!bTouches) continue;
     const aDef = aTouches.find((t) => DEFINED.has(t.event.type) && t.event.name === name);
     const bDef = bTouches.find((t) => DEFINED.has(t.event.type) && t.event.name === name);
-    if (aDef && bDef && aDef.event.path !== bDef.event.path) {
+    if (aDef && bDef && canCollide(aDef.event, bDef.event)) {
       warnings.push({
         kind: "duplicate-definition",
         entity: name,

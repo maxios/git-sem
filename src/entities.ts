@@ -16,11 +16,31 @@ export interface Entity {
   end: number;
   /** Hash of the normalized body with the entity's own name removed: equal across pure renames. */
   hash: string;
+  /** Visible outside its file or module: export (JS/TS), pub (Rust), Capitalized (Go), no leading _ (Python). */
+  exported: boolean;
 }
 
 type Language = "brace" | "python";
 
 const BRACE_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "go", "rs"]);
+
+/** The language family a file belongs to; entities only collide within one family. */
+export function familyOf(path: string): string | undefined {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"].includes(ext)) return "js";
+  if (["py", "go", "rs"].includes(ext)) return ext;
+  return undefined;
+}
+
+/** Tests define fixtures and helpers that never meet production code. */
+export function isTestPath(path: string): boolean {
+  return (
+    /(^|\/)(test|tests|__tests__|spec|e2e)\//.test(path) ||
+    /\.(test|spec)\.[cm]?[jt]sx?$/.test(path) ||
+    /_test\.go$/.test(path) ||
+    /(^|\/)test_[^/]*\.py$|_test\.py$/.test(path)
+  );
+}
 
 export function languageOf(path: string): Language | undefined {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
@@ -148,9 +168,17 @@ function bodyHash(body: string, name: string): string {
   return createHash("sha1").update(normalized).digest("hex").slice(0, 16);
 }
 
-function push(out: Entity[], lines: string[], name: string, kind: Entity["kind"], start: number, end: number): void {
+function push(out: Entity[], lines: string[], name: string, kind: Entity["kind"], start: number, end: number, exported: boolean): void {
   const body = lines.slice(start, end + 1).join("\n");
-  out.push({ name, kind, start: start + 1, end: end + 1, hash: bodyHash(body, name) });
+  out.push({ name, kind, start: start + 1, end: end + 1, hash: bodyHash(body, name), exported });
+}
+
+function braceExported(line: string, name: string): boolean {
+  const trimmed = line.trimStart();
+  if (/^export\b/.test(trimmed) || /^pub\b/.test(trimmed)) return true;
+  // Go: exported identifiers start with a capital letter.
+  if (/^(func|type)\b/.test(trimmed)) return /^[A-Z]/.test(name);
+  return false;
 }
 
 function extractBrace(lines: string[]): Entity[] {
@@ -164,14 +192,16 @@ function extractBrace(lines: string[]): Entity[] {
       const name = m?.[p.group];
       if (!m || !name || KEYWORDS.has(name)) continue;
       const end = braceEnd(lines, i);
-      push(out, lines, name, p.kind, i, end);
+      const exported = braceExported(line, name);
+      push(out, lines, name, p.kind, i, end, exported);
       if (p.kind === "class") {
         for (let j = i + 1; j < end; j++) {
           const mm = METHOD.exec(lines[j]!);
           const method = mm?.[1];
           if (!method || KEYWORDS.has(method) || method === "constructor") continue;
           const mEnd = braceEnd(lines, j);
-          push(out, lines, `${name}.${method}`, "method", j, mEnd);
+          const isPrivate = /^\s*(private|protected)\b/.test(lines[j]!) || method.startsWith("#");
+          push(out, lines, `${name}.${method}`, "method", j, mEnd, exported && !isPrivate);
           j = mEnd;
         }
       }
@@ -194,13 +224,14 @@ function extractPython(lines: string[]): Entity[] {
     const end = pythonEnd(lines, i);
     while (classes.length && (i > classes.at(-1)!.end || indent <= classes.at(-1)!.indent)) classes.pop();
     const owner = classes.at(-1);
+    const publicName = !m[3]!.startsWith("_");
     if (m[2] === "class") {
-      push(out, lines, m[3]!, "class", i, end);
+      push(out, lines, m[3]!, "class", i, end, publicName);
       classes.push({ name: m[3]!, indent, end });
     } else if (owner) {
-      push(out, lines, `${owner.name}.${m[3]}`, "method", i, end);
+      push(out, lines, `${owner.name}.${m[3]}`, "method", i, end, publicName && !owner.name.startsWith("_"));
     } else if (indent === 0) {
-      push(out, lines, m[3]!, "function", i, end);
+      push(out, lines, m[3]!, "function", i, end, publicName);
     }
   }
   return out;
@@ -220,13 +251,30 @@ export function bodyOf(content: string, e: Pick<Entity, "start" | "end">): strin
   return content.split("\n").slice(e.start - 1, e.end).join("\n");
 }
 
-/** Jaccard similarity of token sets, ignoring the entities' own names. */
+const KEYWORD_TOKENS = new Set([
+  "const", "let", "var", "return", "if", "else", "for", "while", "do", "switch", "case", "break", "continue",
+  "function", "async", "await", "new", "this", "null", "undefined", "true", "false", "export", "import", "from",
+  "default", "class", "extends", "typeof", "instanceof", "in", "of", "try", "catch", "finally", "throw", "void",
+  "def", "self", "pass", "None", "True", "False", "and", "or", "not", "is", "lambda", "yield", "with", "as",
+  "fn", "pub", "mut", "impl", "struct", "enum", "match", "use", "mod", "func", "package", "type", "interface",
+  "go", "defer", "chan", "map", "range", "nil", "public", "private", "protected", "static", "readonly",
+]);
+
+/**
+ * The tokens that carry meaning: identifiers and literals, without syntax,
+ * keywords, or the entity's own name. Short bodies share almost all their
+ * syntax, so comparing everything makes unrelated one-liners look alike (#4).
+ */
+export function meaningfulTokens(text: string, name: string): Set<string> {
+  const own = name.split(".").pop()!;
+  return new Set(tokens(text).filter((t) => /^[A-Za-z_$\d]/.test(t) && !KEYWORD_TOKENS.has(t) && t !== own));
+}
+
+/** Jaccard similarity of meaningful token sets. */
 export function similarity(a: string, aName: string, b: string, bName: string): number {
-  const own = (n: string) => n.split(".").pop()!;
-  const set = (text: string, name: string) => new Set(tokens(text).filter((t) => t !== own(name)));
-  const sa = set(a, aName);
-  const sb = set(b, bName);
-  if (sa.size === 0 && sb.size === 0) return 1;
+  const sa = meaningfulTokens(a, aName);
+  const sb = meaningfulTokens(b, bName);
+  if (sa.size === 0 || sb.size === 0) return 0;
   let inter = 0;
   for (const t of sa) if (sb.has(t)) inter++;
   return inter / (sa.size + sb.size - inter);
@@ -243,6 +291,8 @@ export interface EntityEvent {
   type: "added" | "modified" | "removed" | "renamed" | "moved" | "ambiguous";
   name: string;
   path: string;
+  /** Whether the (new) entity is visible outside its file or module. */
+  exported?: boolean;
   /** Previous identity for renamed/moved; the removed entity for ambiguous. */
   from?: EntityRef;
   /** For ambiguous: the equally good successors. */
@@ -258,8 +308,11 @@ export interface FileVersion {
   content: string;
 }
 
-export const LINK_THRESHOLD = 0.6;
+/** Tier 1 links need this similarity of meaningful tokens (#4: below 0.7 links were mostly wrong). */
+export const LINK_THRESHOLD = 0.7;
 export const AMBIGUITY_MARGIN = 0.05;
+/** Below this many distinct meaningful tokens a body is too small to tell apart: only exact links. */
+export const MIN_LINK_TOKENS = 6;
 
 /**
  * Compare entities before and after a commit across all changed files, so a
@@ -280,17 +333,22 @@ export function diffEntities(before: FileVersion[], after: FileVersion[]): Entit
   const events: EntityEvent[] = [];
   for (const e of neu) {
     const prev = oldByKey.get(key(e));
-    if (prev && prev.hash !== e.hash) events.push({ type: "modified", name: e.name, path: e.path, tier: 0 });
+    if (prev && prev.hash !== e.hash) events.push({ type: "modified", name: e.name, path: e.path, exported: e.exported, tier: 0 });
   }
 
   const removed = old.filter((e) => !newByKey.has(key(e)));
   const added = neu.filter((e) => !oldByKey.has(key(e)));
 
+  const fuzzyScore = (r: Item, a: Item): number => {
+    const big = meaningfulTokens(r.body, r.name).size >= MIN_LINK_TOKENS && meaningfulTokens(a.body, a.name).size >= MIN_LINK_TOKENS;
+    return big ? similarity(r.body, r.name, a.body, a.name) : 0;
+  };
+
   const scored = removed.map((r) => ({
     r,
     options: added
       .filter((a) => a.kind === r.kind || (a.kind !== "type" && r.kind !== "type"))
-      .map((a) => ({ a, score: a.hash === r.hash ? 1 : similarity(r.body, r.name, a.body, a.name) }))
+      .map((a) => ({ a, score: a.hash === r.hash ? 1 : fuzzyScore(r, a) }))
       .filter((o) => o.score >= LINK_THRESHOLD)
       .sort((x, y) => y.score - x.score),
   }));
@@ -322,13 +380,14 @@ export function diffEntities(before: FileVersion[], after: FileVersion[]): Entit
       type: best.a.name === r.name ? "moved" : "renamed",
       name: best.a.name,
       path: best.a.path,
+      exported: best.a.exported,
       from: { name: r.name, path: r.path },
       score: round(best.score),
       tier: best.score === 1 ? 0 : 1,
     });
   }
 
-  for (const a of added) if (!used.has(key(a))) events.push({ type: "added", name: a.name, path: a.path, tier: 0 });
+  for (const a of added) if (!used.has(key(a))) events.push({ type: "added", name: a.name, path: a.path, exported: a.exported, tier: 0 });
   for (const r of removed) if (!linkedOld.has(key(r))) events.push({ type: "removed", name: r.name, path: r.path, tier: 0 });
   return events;
 }
