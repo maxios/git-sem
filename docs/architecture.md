@@ -12,6 +12,9 @@ src/
   indexer.ts        commits → artifacts
   changes.ts        raw diff parsing (diff-tree, diff --cached)
   engines/          heuristic and command engines
+  batch.ts          cat-file --batch reader, fast-import note writer
+  draft.ts          commit drafting: history, reversals, questions
+  background.ts     detached indexer, progress reporting
   queue.ts          commit queue written by the hook
   lock.ts           single-indexer lock
   config.ts         `sem.*` git config
@@ -69,6 +72,28 @@ entry is lost.
 Indexing is idempotent. Running it twice does nothing the second time, which
 is what makes retries, backfills and model upgrades safe.
 
+### Batching
+
+```
+  git cat-file --batch   one process
+     note bodies, blob contents
+          │
+          ▼
+  index in memory
+          │
+          ▼
+  git fast-import        every 200
+     one notes commit      commits
+     for all new records
+```
+
+Reads list the notes tree once (`ls-tree -r`) and fetch bodies through one
+long-lived `cat-file --batch`. Writes are buffered and committed with one
+`fast-import` per flush. Notes git stored under fan-out directories are
+deleted and rewritten flat, so an object never has two notes. If another
+writer moved the notes ref meanwhile, the flush reloads, re-merges and
+retries.
+
 ## Records
 
 Each note is JSON Lines: one immutable record per line.
@@ -122,6 +147,34 @@ without conflict, and readers deduplicate by key.
 `git sem push` fetches and merges before pushing and retries if it races
 another pusher.
 
+## Drafting a commit
+
+```
+  staged changes
+       │
+       ├─► related history
+       │   git log --notes -- <paths>
+       │   (lookup only)
+       │
+       ├─► reversals (Tier 0)
+       │   staged blob == the old blob
+       │   of a past commit on that path
+       │
+       └─► engine proposal
+           with history + reversals
+                │
+                ▼
+  editor template: subject, then
+  warnings, questions, history
+  as # comments (stripped by git)
+                │
+                ▼
+  committed message is stored
+  as an authored intent
+```
+
+Low confidence never becomes confident prose: it becomes a question.
+
 ## Read path
 
 `git sem log` is one `git log --notes=refs/notes/sem` call that returns
@@ -161,6 +214,5 @@ before and after a command, so they test behavior rather than implementation.
       entities
 ```
 
-Performance work worth doing before large backfills: read notes with
-`cat-file --batch` instead of one `notes show` per object, and write notes in
-batches via `fast-import`.
+Drafting currently relates history by path. Once F6 lands it can relate by
+entity, so a renamed function keeps its history.
