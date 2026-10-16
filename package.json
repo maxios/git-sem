@@ -1,0 +1,27 @@
+{
+  "name": "git-sem",
+  "version": "0.1.0",
+  "description": "A semantic layer over git: inference at write time, lookup at read time.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "git-sem": "./src/cli.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "test:e2e": "bun test test/e2e",
+    "test:unit": "bun test test/unit",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@cucumber/cucumber-expressions": "^20.1.0",
+    "@cucumber/gherkin": "^42.0.1",
+    "@cucumber/messages": "^34.2.1",
+    "@types/bun": "^1.4.3",
+    "typescript": "^7.0.2"
+  }
+}
