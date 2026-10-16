@@ -5,10 +5,14 @@ export function short(hash: string): string {
   return hash.slice(0, 7);
 }
 
+/** Wide enough for every kind and source, with a space always after each column. */
+const KIND_WIDTH = 13; // "entity-events"
+const SOURCE_WIDTH = 8; // "inferred", "authored"
+
 export function provenanceLine(r: ArtifactRecord): string {
   const who = r.author ? ` author=${r.author}` : "";
   return (
-    `${r.kind.padEnd(8)}${r.source.padEnd(10)}engine=${r.engine} model=${r.model} prompt=${r.prompt}` +
+    `${r.kind.padEnd(KIND_WIDTH)} ${r.source.padEnd(SOURCE_WIDTH)} engine=${r.engine} model=${r.model} prompt=${r.prompt}` +
     ` tier=${r.tier} confidence=${r.confidence.toFixed(2)}${who} at=${r.createdAt}`
   );
 }

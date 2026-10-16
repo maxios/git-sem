@@ -8,6 +8,7 @@ import {
   type ArtifactRecord,
 } from "../../src/artifacts.ts";
 import { parseRawZ } from "../../src/changes.ts";
+import { provenanceLine } from "../../src/commands/format.ts";
 import { installBlock, HOOK_BEGIN } from "../../src/commands/init.ts";
 
 function intent(over: Partial<ArtifactRecord>): ArtifactRecord {
@@ -127,5 +128,17 @@ describe("hook installation", () => {
     expect(appended.startsWith(custom)).toBe(true);
     expect(appended.split(HOOK_BEGIN)).toHaveLength(2);
     expect(installBlock(appended)).toBe(appended);
+  });
+});
+
+describe("provenance lines", () => {
+  test("every kind is separated from its source, even the longest (#7)", () => {
+    for (const kind of ["changes", "file", "intent", "entities", "entity-events", "entity-link", "decision", "rollup"] as const) {
+      for (const source of ["derived", "inferred", "authored"] as const) {
+        const line = provenanceLine(intent({ kind, source }));
+        expect(line.startsWith(`${kind} `)).toBe(true);
+        expect(line).toMatch(new RegExp(`^${kind} +${source} +engine=`));
+      }
+    }
   });
 });
