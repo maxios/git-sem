@@ -30,6 +30,10 @@ step("branch {string} adds {string} with a function {string}", async (w: World, 
   await w.git(["checkout", "--quiet", "main"]);
 });
 
+step("a branch named {string} exists", async (w: World, branch: string) => {
+  await w.git(["branch", branch]);
+});
+
 step("I delete the branch {string}", async (w: World, branch: string) => {
   await w.git(["branch", "--quiet", "-D", branch]);
 });

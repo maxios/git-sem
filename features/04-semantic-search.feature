@@ -26,3 +26,10 @@ Feature: Semantic search across history and branches
     Then the search results do not include "warmCacheEagerly"
     When I run "git sem search 'warm cache eagerly' --include-unreachable"
     Then the search results include "warmCacheEagerly" labeled "unreachable"
+
+  Scenario: Search works when a branch shares its name with a directory
+    Given I commit "playground/demo.ts" with a function "playgroundDemo"
+    And a branch named "playground" exists
+    And I run "git sem index"
+    When I run "git sem search 'playground demo'"
+    Then the search results include "playgroundDemo" labeled "playground"
