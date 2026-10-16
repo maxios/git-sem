@@ -10,10 +10,20 @@ import {
 import { NotesBatch, resolveCommits } from "./batch.ts";
 import { commitChanges, commitDiff, isRegularFile } from "./changes.ts";
 import { identityOf, type Engine } from "./engines/index.ts";
+import { extractEntities, languageOf } from "./entities.ts";
+import {
+  CHANGES_KEY,
+  computeEntityEvents,
+  ENTITIES_KEY,
+  ENTITY_EVENTS_KEY,
+  entitiesRecord,
+  entityEventsRecord,
+  hasOldBlobs,
+} from "./entity-git.ts";
 import { messageOf } from "./errors.ts";
 import type { Git } from "./git.ts";
 
-export const CHANGES_KEY = "changes:derived:core:none:changes/v1";
+export { CHANGES_KEY };
 export const FILE_KEY = "file:derived:core:none:file/v1";
 
 /** Commits between note flushes; bounds memory and work lost on a crash. */
@@ -141,8 +151,13 @@ export class Indexer {
 
       for (const entry of changes) {
         if (!entry.blob || !isRegularFile(entry)) continue;
-        if (await this.ensureFile(entry.blob, notes)) stats.files.reused++;
+        if (await this.ensureFile(entry.blob, entry.path, notes)) stats.files.reused++;
         else stats.files.computed++;
+      }
+
+      if (!existing.some((r) => keyOf(r) === ENTITY_EVENTS_KEY)) {
+        const source = hasOldBlobs(changes) ? changes : await commitChanges(this.git, meta.hash, meta.parents);
+        fresh.push(entityEventsRecord(meta.hash, await computeEntityEvents(notes.cat, source)));
       }
 
       const intentKey = intentKeyFor(identityOf(this.engine));
@@ -206,11 +221,17 @@ export class Indexer {
   }
 
   /** Returns true if the blob already had a file artifact (reused), false if it was computed now. */
-  private async ensureFile(blob: string, notes: NotesBatch): Promise<boolean> {
+  private async ensureFile(blob: string, path: string, notes: NotesBatch): Promise<boolean> {
     const existing = await notes.read(blob);
-    if (existing.some((r) => keyOf(r) === FILE_KEY)) return true;
+    const hasFile = existing.some((r) => keyOf(r) === FILE_KEY);
+    const wantsEntities = languageOf(path) !== undefined && !existing.some((r) => keyOf(r) === ENTITIES_KEY);
+    if (hasFile && !wantsEntities) return true;
 
     const bytes = (await notes.cat.read(blob)) ?? new Uint8Array(0);
+    if (wantsEntities) {
+      await notes.add(blob, [entitiesRecord(blob, extractEntities(path, new TextDecoder().decode(bytes)))]);
+    }
+    if (hasFile) return true;
     let lines = 0;
     let binary = false;
     for (let i = 0; i < bytes.length; i++) {

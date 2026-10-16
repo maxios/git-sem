@@ -108,10 +108,10 @@ describe("raw diff parsing", () => {
       "",
     ].join("\0");
     expect(parseRawZ(out)).toEqual([
-      { status: "A", path: "src/new.ts", blob, mode: "100644" },
-      { status: "M", path: "src/changed.ts", blob, mode: "100644" },
-      { status: "D", path: "src/gone.ts", blob: undefined, mode: "000000" },
-      { status: "R", path: "services/user.ts", from: "api/user.ts", blob, mode: "100644", similarity: 87 },
+      { status: "A", path: "src/new.ts", blob, oldBlob: undefined, mode: "100644" },
+      { status: "M", path: "src/changed.ts", blob, oldBlob: blob, mode: "100644" },
+      { status: "D", path: "src/gone.ts", blob: undefined, oldBlob: blob, mode: "000000" },
+      { status: "R", path: "services/user.ts", from: "api/user.ts", blob, oldBlob: blob, mode: "100644", similarity: 87 },
     ]);
   });
 });

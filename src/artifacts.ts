@@ -15,7 +15,15 @@ export type Tier = 0 | 1 | 2 | 3;
  */
 export type Source = "derived" | "inferred" | "authored";
 
-export type Kind = "changes" | "file" | "intent";
+export type Kind =
+  | "changes"
+  | "file"
+  | "intent"
+  | "entities"
+  | "entity-events"
+  | "entity-link"
+  | "decision"
+  | "rollup";
 
 export interface ChangeEntry {
   /** A, M, D, R, C, T (git raw diff status letter). */
@@ -25,6 +33,8 @@ export interface ChangeEntry {
   from?: string;
   /** Object id of the new blob; absent for deletions. */
   blob?: string;
+  /** Object id of the previous blob; absent for additions. */
+  oldBlob?: string;
   /** File mode of the new blob, e.g. 100644. */
   mode?: string;
   /** Rename/copy similarity percentage. */

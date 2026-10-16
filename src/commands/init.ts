@@ -34,20 +34,25 @@ export function installBlock(existing: string | undefined): string {
 export async function initCommand(args: string[]): Promise<number> {
   const { values } = parseArgs({ args, options: { backfill: { type: "boolean" } } });
   const repo = await openRepo();
-  const hookPath = await repo.git.out(["rev-parse", "--path-format=absolute", "--git-path", "hooks/post-commit"]);
-
-  await mkdir(dirname(hookPath), { recursive: true });
-  const existing = await readFile(hookPath, "utf8").catch(() => undefined);
-  const next = installBlock(existing);
-  if (next !== existing) await writeFile(hookPath, next);
-  await chmod(hookPath, 0o755);
+  // post-commit covers commits; post-merge covers merge commits, which do
+  // not run post-commit.
+  const hooks: string[] = [];
+  for (const name of ["post-commit", "post-merge"]) {
+    const hookPath = await repo.git.out(["rev-parse", "--path-format=absolute", "--git-path", `hooks/${name}`]);
+    await mkdir(dirname(hookPath), { recursive: true });
+    const existing = await readFile(hookPath, "utf8").catch(() => undefined);
+    const next = installBlock(existing);
+    if (next !== existing) await writeFile(hookPath, next);
+    await chmod(hookPath, 0o755);
+    hooks.push(hookPath);
+  }
 
   // Union semantics when teammates' notes meet: every record is one line, so
   // concatenate-sort-dedupe can never conflict.
   await repo.git.run(["config", "notes.sem.mergeStrategy", "cat_sort_uniq"]);
 
   console.log(`git-sem initialized
-  hook     ${hookPath}
+  hooks    ${hooks.join("\n           ")}
   notes    refs/notes/sem (merge: cat_sort_uniq)
   state    ${repo.semDir}`);
 

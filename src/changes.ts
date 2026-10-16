@@ -11,18 +11,19 @@ export function parseRawZ(out: string): ChangeEntry[] {
   while (i < parts.length) {
     const head = parts[i++];
     if (!head || !head.startsWith(":")) continue;
-    const [, dstMode, , dstSha, statusField = ""] = head.slice(1).split(" ");
+    const [, dstMode, srcSha, dstSha, statusField = ""] = head.slice(1).split(" ");
     const status = statusField.charAt(0);
     const score = statusField.slice(1);
     const blob = dstSha && !ZERO.test(dstSha) ? dstSha : undefined;
+    const oldBlob = srcSha && !ZERO.test(srcSha) ? srcSha : undefined;
 
     if (status === "R" || status === "C") {
       const from = parts[i++] ?? "";
       const path = parts[i++] ?? "";
-      entries.push({ status, path, from, blob, mode: dstMode, similarity: score ? Number(score) : undefined });
+      entries.push({ status, path, from, blob, oldBlob, mode: dstMode, similarity: score ? Number(score) : undefined });
     } else {
       const path = parts[i++] ?? "";
-      entries.push({ status, path, blob, mode: dstMode });
+      entries.push({ status, path, blob, oldBlob, mode: dstMode });
     }
   }
   return entries;
