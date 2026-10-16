@@ -63,6 +63,6 @@ missing row.
 |---|---|---|
 | Over-trust | cite evidence, show confidence inline, separate authored from inferred | ✅ |
 | Privacy | per-path tier ceilings and a `.semignore`; redact before any remote call | planned |
-| Garbage in | enrich inputs (PRs, issues, tests); low confidence is shown, not hidden | partial |
-| Backfill cost | Tier 0 everywhere, model tiers lazily and by priority; share results through git | partial |
+| Garbage in | enrich inputs (PRs, issues, tests); low confidence is shown, not hidden; drafts ask instead of inventing | partial |
+| Backfill cost | Tier 0 everywhere, model tiers lazily and by priority; share results through git | ✅ |
 | Correctness | crystallize accepted intents into tests and invariants; track intent coverage | planned |

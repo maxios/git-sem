@@ -15,6 +15,15 @@ src/
   batch.ts          cat-file --batch reader, fast-import note writer
   draft.ts          commit drafting: history, reversals, questions
   background.ts     detached indexer, progress reporting
+  entities.ts       Tier 0 entity extraction and per-commit diffing
+  entity-git.ts     entity records, events for any commit
+  lineage.ts        entity lineage, worlds, why
+  embed.ts          Tier 1 local embedding (feature hashing)
+  search-index.ts   SQLite read cache rebuilt from notes
+  merge.ts          sides of a merge, co-touched entities, checks
+  intents.ts        set, accept, agent proposals, branch roll-up
+  budget.ts         daily Tier 3 budget
+  api.ts            library API for agents (MCP: commands/mcp.ts)
   queue.ts          commit queue written by the hook
   lock.ts           single-indexer lock
   config.ts         `sem.*` git config
@@ -26,10 +35,11 @@ test/unit/          pure-function tests
 ## Write path
 
 ```
-  git commit
+  git commit / git merge
       │
       ▼
   .git/hooks/post-commit
+  .git/hooks/post-merge
   ├─ git rev-parse HEAD >> sem/queue
   └─ if sem.autoindex:
        (git sem index --background &)
@@ -63,6 +73,18 @@ entry is lost.
     ├─► file      derived · Tier 0
     │   one per new blob, stored on
     │   the blob itself; reused by hash
+    │
+    ├─► entities  derived · Tier 0
+    │   per source blob: functions,
+    │   classes, methods, types
+    │
+    ├─► entity-events  derived · 0/1
+    │   added, modified, removed,
+    │   renamed, moved, ambiguous
+    │
+    ├─► decision  derived · Tier 0
+    │   merge commits only: merged
+    │   despite check warnings, by whom
     │
     └─► intent    inferred · engine tier
         keyed by engine+model+prompt;
@@ -137,6 +159,9 @@ Displayed intent is resolved in this order:
   .git/sem/                      local only
     queue, queue.processing
     index.lock, last-run.json
+    progress.json, budget.json
+    index.sqlite                 search cache
+    proposals/                   resolve proposals
 ```
 
 Records are written with `hash-object` + `notes add -C`, so git stores the
@@ -175,6 +200,73 @@ another pusher.
 
 Low confidence never becomes confident prose: it becomes a question.
 
+## Entities
+
+```
+  blob contents
+       │  declaration patterns +
+       │  brace / indent matching
+       ▼
+  entities: name, kind, lines,
+  hash(body without own name)
+       │
+       ▼
+  per commit, across all
+  changed files:
+  ├─ same name+path, new hash  modified
+  ├─ equal hash elsewhere      renamed/moved  (Tier 0)
+  ├─ similarity ≥ 0.6          renamed/moved  (Tier 1)
+  ├─ two within 0.05           ambiguous: shown, not decided
+  └─ otherwise                 added / removed
+```
+
+Lineage walks history newest-first and follows `from` links. An ambiguous
+succession is followed only after `git sem entity confirm` records an
+authored `entity-link`. `why` keeps only intents that are authored, or
+inferred with confidence ≥ 0.5 from a commit that added fewer than 10
+entities, and reports "insufficient" otherwise.
+
+## Search
+
+```
+  refs/notes/sem
+       │  rebuild when the notes
+       │  tip changes (no model)
+       ▼
+  .git/sem/index.sqlite
+  commit docs   intent + subject
+  entity docs   split name + intent
+                + body
+       │  512-dim feature hashing
+       ▼
+  cosine ranking, best version
+  per entity, labeled with
+  branches / reflog / unreachable
+```
+
+## Merging
+
+`readSides(a, b)` reads the commits in `base..a` and `base..b` with their
+notes, computing entity events on the fly for anything not indexed yet. On
+top of that:
+
+- `merge-view` keeps entities both sides touched and compares the sides'
+  intents with the Tier 1 embedding (≥ 0.4 means likely redundant).
+- `check` applies Tier 0 rules: duplicate definitions in different files,
+  and renames or removals that the other side still adds uses of (`git log -G`
+  plus a check of added lines).
+- `resolve` asks the engine for file contents and stores the proposal under
+  `.git/sem/proposals`; `--accept` writes it only if the conflict has not
+  changed, and never stages it.
+
+## Agents
+
+`src/api.ts` exposes `log`, `show`, `entity`, `why`, `search` and
+`proposeIntent` as plain JSON, and `git sem mcp` serves the same over MCP
+(newline-delimited JSON-RPC on stdio). Agent proposals are `inferred`
+records with `engine: "agent"` and the agent's name as `model`; only a
+person turns them into `authored` intents.
+
 ## Read path
 
 `git sem log` is one `git log --notes=refs/notes/sem` call that returns
@@ -200,19 +292,17 @@ No read command ever constructs a request to an engine.
 Assertions about "no inference happened" count the fake engine's log lines
 before and after a command, so they test behavior rather than implementation.
 
-## Next
+## Known limits
 
-```
-  F6  entities via tree-sitter;
-      rename/move identity
-  F4  embeddings + local vector
-      index (cache, rebuildable)
-  F13 SQLite read cache built
-      from refs/notes/sem
-  F11 tier routing and budgets
-  F7  merge-view over co-touched
-      entities
-```
-
-Drafting currently relates history by path. Once F6 lands it can relate by
-entity, so a renamed function keeps its history.
+- **Entity extraction is pattern-based.** It covers common declarations in
+  TS/JS, Python, Go and Rust, not every syntax. A tree-sitter extractor can
+  replace it behind the same `extractEntities` signature.
+- **Search is lexical.** The Tier 1 embedding matches words, split
+  identifiers and character trigrams, not concepts. A model-backed embedder
+  can replace `embed()`.
+- **The search index rebuilds fully** when the notes move. Fine for
+  thousands of commits; very large histories want incremental updates.
+- **Reversal detection is exact.** Partial undos are left to the engine,
+  which sees the relevant history.
+- **Privacy controls are not built yet**: no `.semignore` or per-path tier
+  ceilings. Choose a local engine for sensitive code.
