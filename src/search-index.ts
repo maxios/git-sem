@@ -185,7 +185,7 @@ export async function reachability(git: Git): Promise<Reachability> {
   const branches = new Map<string, string[]>();
   const refs = (await git.out(["for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/tags"])).split("\n").filter(Boolean);
   for (const ref of refs) {
-    for (const c of (await git.out(["rev-list", ref])).split("\n").filter(Boolean)) {
+    for (const c of (await git.out(["rev-list", ref, "--"])).split("\n").filter(Boolean)) {
       const list = branches.get(c) ?? [];
       list.push(ref);
       branches.set(c, list);
