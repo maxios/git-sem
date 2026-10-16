@@ -12,6 +12,7 @@ import "./steps/assertions.ts";
 import "./steps/entities.ts";
 import "./steps/search.ts";
 import "./steps/merging.ts";
+import "./steps/tiers.ts";
 import { loadFeatures, tagsOf } from "./support/gherkin.ts";
 import { runStep } from "./support/registry.ts";
 import { World } from "./support/world.ts";
