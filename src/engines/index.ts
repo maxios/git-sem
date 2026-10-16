@@ -32,3 +32,19 @@ export function resolveEngine(config: SemConfig, cwd: string): Engine {
 export function identityOf(engine: Engine): EngineIdentity {
   return { engine: engine.id, model: engine.model, prompt: engine.promptVersion };
 }
+
+/** The Tier 3 engine, or undefined when none is configured. Never used implicitly. */
+export function resolveFrontier(config: SemConfig, cwd: string): Engine | undefined {
+  const { command, model } = config.frontier;
+  if (!command) return undefined;
+  if (!model) throw new UserError("sem.frontier.command is set but sem.frontier.model is not");
+  return commandEngine({
+    id: "frontier",
+    command,
+    model,
+    promptVersion: config.promptVersion ?? DEFAULT_PROMPT_VERSION,
+    tier: 3,
+    cwd,
+    timeoutMs: config.timeoutMs,
+  });
+}

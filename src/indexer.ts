@@ -21,10 +21,12 @@ import {
   hasOldBlobs,
 } from "./entity-git.ts";
 import { messageOf } from "./errors.ts";
+import { findContradictions, readSides } from "./merge.ts";
 import type { Git } from "./git.ts";
 
 export { CHANGES_KEY };
 export const FILE_KEY = "file:derived:core:none:file/v1";
+export const DECISION_KEY = "decision:derived:core:none:merge/v1";
 
 /** Commits between note flushes; bounds memory and work lost on a crash. */
 const FLUSH_EVERY = 200;
@@ -34,6 +36,7 @@ export interface CommitMeta {
   parents: string[];
   subject: string;
   body: string;
+  committer: string;
 }
 
 export interface IndexStats {
@@ -75,15 +78,15 @@ export function addStats(into: IndexStats, from: IndexStats): void {
 export async function readCommitMeta(git: Git, commits: string[]): Promise<Map<string, CommitMeta>> {
   const metas = new Map<string, CommitMeta>();
   if (commits.length === 0) return metas;
-  const r = await git.run(["log", "--no-walk=unsorted", "--stdin", "--format=%H%x1f%P%x1f%s%x1f%b%x1e"], {
+  const r = await git.run(["log", "--no-walk=unsorted", "--stdin", "--format=%H%x1f%P%x1f%s%x1f%ce%x1f%b%x1e"], {
     input: `${commits.join("\n")}\n`,
   });
   for (const raw of r.stdout.split("\x1e")) {
     const record = raw.replace(/^\n/, "");
     if (!record) continue;
-    const [hash = "", parents = "", subject = "", body = ""] = record.split("\x1f");
+    const [hash = "", parents = "", subject = "", committer = "", body = ""] = record.split("\x1f");
     if (!hash) continue;
-    metas.set(hash, { hash, parents: parents.split(" ").filter(Boolean), subject, body: body.trim() });
+    metas.set(hash, { hash, parents: parents.split(" ").filter(Boolean), subject, committer, body: body.trim() });
   }
   return metas;
 }
@@ -160,6 +163,11 @@ export class Indexer {
         fresh.push(entityEventsRecord(meta.hash, await computeEntityEvents(notes.cat, source)));
       }
 
+      if (meta.parents.length >= 2 && !existing.some((r) => keyOf(r) === DECISION_KEY)) {
+        const decision = await this.mergeDecision(meta);
+        if (decision) fresh.push(decision);
+      }
+
       const intentKey = intentKeyFor(identityOf(this.engine));
       if (existing.some((r) => keyOf(r) === intentKey)) {
         stats.intents.reused++;
@@ -198,6 +206,30 @@ export class Indexer {
       confidence: proposal.confidence,
       value: { text: proposal.text },
       evidence: [meta.hash],
+      createdAt: now(),
+    };
+  }
+
+  /**
+   * A merge whose sides had Tier 0 warnings records that it went ahead
+   * anyway, and who decided. The warnings never blocked it.
+   */
+  private async mergeDecision(meta: CommitMeta): Promise<ArtifactRecord | undefined> {
+    const [first, second] = meta.parents as [string, string];
+    const warnings = await findContradictions(this.git, await readSides(this.git, first, second));
+    if (warnings.length === 0) return undefined;
+    return {
+      v: 1,
+      kind: "decision",
+      object: meta.hash,
+      source: "derived",
+      engine: "core",
+      model: "none",
+      prompt: "merge/v1",
+      tier: 0,
+      confidence: 1,
+      value: { outcome: "merged", by: meta.committer, warnings },
+      evidence: [meta.hash, ...meta.parents],
       createdAt: now(),
     };
   }

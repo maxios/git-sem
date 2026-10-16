@@ -34,5 +34,20 @@ export function heuristicEngine(): Engine {
       if (descriptive) return { text: subject, confidence: 0.3 };
       return { text: describeChanges(input.changes), confidence: 0.1 };
     },
+    async summarize(input): Promise<IntentProposal> {
+      const unique = [...new Set(input.intents.map((i) => i.split("\n")[0]!.trim()).filter(Boolean))];
+      if (unique.length === 0) return { text: "No recorded intents", confidence: 0 };
+      if (unique.length === 1) return { text: unique[0]!, confidence: 0.3 };
+      const shown = unique.slice(0, 3).join("; ");
+      const more = unique.length > 3 ? `; and ${unique.length - 3} more` : "";
+      return { text: `${unique.length} changes: ${shown}${more}`, confidence: 0.2 };
+    },
+    /** Only the unambiguous cases: one side left the file as it was. */
+    async resolveConflict(input): Promise<IntentProposal | null> {
+      if (input.base === null) return null;
+      if (input.ours === input.base) return { text: input.theirs, confidence: 1 };
+      if (input.theirs === input.base) return { text: input.ours, confidence: 1 };
+      return null;
+    },
   };
 }

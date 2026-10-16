@@ -4,6 +4,7 @@ import { indexCommand } from "./commands/index-cmd.ts";
 import { initCommand } from "./commands/init.ts";
 import { intentCommand } from "./commands/intent.ts";
 import { logCommand } from "./commands/log.ts";
+import { checkCommand, mergeViewCommand, resolveCommand } from "./commands/merge.ts";
 import { rebuildCommand, searchCommand, similarCommand } from "./commands/search.ts";
 import { showCommand } from "./commands/show.ts";
 import { statusCommand } from "./commands/status.ts";
@@ -60,6 +61,13 @@ judgment (yours)
   intent <rev> --set TEXT  record your own intent
   intent <rev> --accept    adopt the inferred proposal as yours
 
+merging (you decide; nothing is merged for you)
+  merge-view <a> <b>       entities both sides changed, with each side's intent
+  check <a> <b>            Tier 0 warnings for clean-but-suspect merges
+    --deep                 also ask the Tier 3 frontier engine (budgeted)
+  resolve <path>           propose a resolution for a conflicted file
+    --accept               write the last proposal (does not stage it)
+
 team
   push [<remote>]          share semantics (refs/notes/sem)
   fetch [<remote>]         receive and union a remote's semantics
@@ -76,6 +84,9 @@ const COMMANDS: Record<string, Command> = {
   search: searchCommand,
   similar: similarCommand,
   rebuild: rebuildCommand,
+  "merge-view": mergeViewCommand,
+  resolve: resolveCommand,
+  check: checkCommand,
   index: indexCommand,
   log: logCommand,
   show: showCommand,

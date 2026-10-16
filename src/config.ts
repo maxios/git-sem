@@ -16,6 +16,13 @@ export interface SemConfig {
   tier?: Tier;
   /** Engine timeout in milliseconds. Default 120000. */
   timeoutMs: number;
+  /** Tier 3 engine, used only on explicit request (e.g. `check --deep`). */
+  frontier: {
+    command?: string;
+    model?: string;
+    /** Maximum frontier calls per day; undefined means unlimited. */
+    dailyBudget?: number;
+  };
 }
 
 function parseBool(value: string | undefined, fallback: boolean): boolean {
@@ -27,6 +34,12 @@ function parseTier(value: string | undefined): Tier | undefined {
   if (value === undefined) return undefined;
   const n = Number(value);
   return n === 0 || n === 1 || n === 2 || n === 3 ? n : undefined;
+}
+
+function parseBudget(value: string | undefined): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 /** Read every `sem.*` key in one git call. Keys are case-insensitive in git. */
@@ -49,5 +62,10 @@ export async function readConfig(git: Git): Promise<SemConfig> {
     promptVersion: values.get("sem.promptversion") || undefined,
     tier: parseTier(values.get("sem.tier")),
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 120_000,
+    frontier: {
+      command: values.get("sem.frontier.command") || undefined,
+      model: values.get("sem.frontier.model") || undefined,
+      dailyBudget: parseBudget(values.get("sem.frontier.dailybudget")),
+    },
   };
 }

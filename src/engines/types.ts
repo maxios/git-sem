@@ -22,6 +22,41 @@ export interface IntentInput {
   reversals?: Array<{ path: string; commit: string; subject: string; intent: string | null }>;
 }
 
+/** Roll many commit intents up into one statement (a branch). */
+export interface SummarizeInput {
+  protocol: 1;
+  task: "summarize";
+  model: string;
+  promptVersion: string;
+  subject: string;
+  intents: string[];
+}
+
+/** Propose a resolution for one conflicted file. The proposal is never written without consent. */
+export interface ResolveInput {
+  protocol: 1;
+  task: "resolve";
+  model: string;
+  promptVersion: string;
+  path: string;
+  base: string | null;
+  ours: string;
+  theirs: string;
+  oursIntents: string[];
+  theirsIntents: string[];
+}
+
+/** Review two sides of a merge for assumptions that contradict each other. */
+export interface ContradictionInput {
+  protocol: 1;
+  task: "contradictions";
+  model: string;
+  promptVersion: string;
+  a: { ref: string; intents: string[] };
+  b: { ref: string; intents: string[] };
+  warnings: string[];
+}
+
 export interface IntentProposal {
   text: string;
   /** 0..1 */
@@ -42,4 +77,10 @@ export interface Engine {
   /** Whether the indexer should compute and send the unified diff. */
   readonly wantsDiff: boolean;
   proposeIntent(input: IntentInput): Promise<IntentProposal>;
+  summarize?(input: SummarizeInput): Promise<IntentProposal>;
+  /** Null when this engine cannot propose anything for the conflict. */
+  resolveConflict?(input: ResolveInput): Promise<IntentProposal | null>;
+  findContradictions?(input: ContradictionInput): Promise<IntentProposal>;
 }
+
+export type EngineInput = IntentInput | SummarizeInput | ResolveInput | ContradictionInput;
