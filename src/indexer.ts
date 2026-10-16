@@ -19,6 +19,7 @@ import {
   entitiesRecord,
   entityEventsRecord,
   hasOldBlobs,
+  ownChanges,
 } from "./entity-git.ts";
 import { messageOf } from "./errors.ts";
 import { findContradictions, readSides } from "./merge.ts";
@@ -160,7 +161,8 @@ export class Indexer {
 
       if (!existing.some((r) => keyOf(r) === ENTITY_EVENTS_KEY)) {
         const source = hasOldBlobs(changes) ? changes : await commitChanges(this.git, meta.hash, meta.parents);
-        fresh.push(entityEventsRecord(meta.hash, await computeEntityEvents(notes.cat, source)));
+        const own = await ownChanges(this.git, meta.hash, meta.parents, source);
+        fresh.push(entityEventsRecord(meta.hash, await computeEntityEvents(notes.cat, own)));
       }
 
       if (meta.parents.length >= 2 && !existing.some((r) => keyOf(r) === DECISION_KEY)) {

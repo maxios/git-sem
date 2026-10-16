@@ -53,7 +53,9 @@ function summary(r: ArtifactRecord | undefined): IntentSummary | null {
  * an ambiguous succession is followed only after a person confirms it.
  */
 export async function entityLineage(git: Git, name: string, current?: EngineIdentity): Promise<Lineage> {
-  const commits = (await git.resolve("HEAD")) ? await commitsWithNotes(git, ["HEAD"]) : [];
+  // Topological order: children before parents, so events read newest first
+  // even when commits share a timestamp.
+  const commits = (await git.resolve("HEAD")) ? await commitsWithNotes(git, ["HEAD"], ["--topo-order"]) : [];
   const cat = new CatFile(git.cwd);
   const tracked = new Set([name]);
   const names = [name];

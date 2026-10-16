@@ -4,7 +4,12 @@ import { commitChanges } from "./changes.ts";
 import { diffEntities, extractEntities, languageOf, type Entity, type EntityEvent, type FileVersion } from "./entities.ts";
 import type { Git } from "./git.ts";
 
-export const ENTITY_EVENTS_KEY = "entity-events:derived:core:none:entities/v1";
+/**
+ * v2: merges record only their own changes (#2); events carry export status
+ * for language-aware checks (#3); Tier 1 links need enough real tokens (#4).
+ * v1 records are ignored and recomputed when read.
+ */
+export const ENTITY_EVENTS_KEY = "entity-events:derived:core:none:entities/v2";
 export const ENTITIES_KEY = "entities:derived:core:none:entities/v1";
 export const CHANGES_KEY = "changes:derived:core:none:changes/v1";
 
@@ -35,6 +40,22 @@ export async function computeEntityEvents(cat: CatFile, changes: ChangeEntry[]):
   return diffEntities(before, after);
 }
 
+/**
+ * For a merge, keep only the files whose result differs from every parent:
+ * the merge's own work (conflict resolutions, evil edits), as `git diff --cc`
+ * sees it. Diffing against the first parent alone would re-record everything
+ * the merged branch already recorded.
+ */
+export async function ownChanges(git: Git, commit: string, parents: string[], changes: ChangeEntry[]): Promise<ChangeEntry[]> {
+  if (parents.length < 2) return changes;
+  let kept = changes;
+  for (const other of parents.slice(1)) {
+    const differs = new Set((await git.run(["diff", "--name-only", "-z", "--no-renames", other, commit, "--"])).stdout.split("\0").filter(Boolean));
+    kept = kept.filter((c) => differs.has(c.path) || (c.from !== undefined && differs.has(c.from)));
+  }
+  return kept;
+}
+
 /** Older notes stored changes without previous blob ids; those need a fresh diff for entity work. */
 export function hasOldBlobs(changes: ChangeEntry[]): boolean {
   return changes.every((c) => c.status === "A" || c.oldBlob !== undefined);
@@ -48,7 +69,7 @@ export function entityEventsRecord(commit: string, events: EntityEvent[]): Artif
     source: "derived",
     engine: "core",
     model: "none",
-    prompt: "entities/v1",
+    prompt: "entities/v2",
     tier: events.some((e) => e.tier === 1) ? 1 : 0,
     confidence: 1,
     value: { events },
@@ -100,7 +121,7 @@ export async function eventsForCommit(
   if (stored) return stored;
   const cached = records.find((r) => keyOf(r) === CHANGES_KEY)?.value as ChangesValue | undefined;
   const changes = cached?.paths && hasOldBlobs(cached.paths) ? cached.paths : await commitChanges(git, commit, parents);
-  return computeEntityEvents(cat, changes);
+  return computeEntityEvents(cat, await ownChanges(git, commit, parents, changes));
 }
 
 export interface CommitNote {

@@ -34,3 +34,10 @@ Feature: Cross-world entity identity
     And the entity "loadUser" is not linked to "fetchUser"
     When I run "git sem entity confirm HEAD fetchUser loadUser"
     Then the entity "loadUser" is linked to "fetchUser" in "api/user.ts"
+
+  Scenario: A merge does not repeat its branch's changes
+    Given on branch "topic" I rename the function "fetchUser" to "loadUser" in place
+    And I merge branch "topic" into "main"
+    And I run "git sem index"
+    When I run "git sem entity loadUser"
+    Then the lineage of "loadUser" reads "renamed, added"

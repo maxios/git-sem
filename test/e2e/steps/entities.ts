@@ -99,6 +99,11 @@ step("the entity {string} is not linked to {string}", async (w: World, name: str
   expect(lineage.names).not.toContain(from);
 });
 
+step("the lineage of {string} reads {string}", async (w: World, name: string, sequence: string) => {
+  const lineage = await w.sem<Lineage>(`entity ${name}`);
+  expect(lineage.steps.map((s) => s.type).join(", ")).toBe(sequence);
+});
+
 step("the lineage of {string} needed no tier above {int}", async (w: World, name: string, tier: number) => {
   const lineage = await w.sem<Lineage>(`entity ${name}`);
   expect(lineage.tier).toBeLessThanOrEqual(tier);
