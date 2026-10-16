@@ -95,9 +95,20 @@ export function entitiesRecord(blob: string, entities: Entity[]): ArtifactRecord
   };
 }
 
-export function eventsIn(records: ArtifactRecord[]): EntityEvent[] | undefined {
-  const r = records.find((x) => keyOf(x) === ENTITY_EVENTS_KEY);
-  return r ? ((r.value as { events: EntityEvent[] }).events ?? []) : undefined;
+const LEGACY_EVENTS_KEYS = ["entity-events:derived:core:none:entities/v1"];
+
+/**
+ * Stored entity events. `allowLegacy` also accepts records from older
+ * versions: fine where only names and paths matter (the search index), not
+ * for lineage, which recomputes them so old merge echoes do not return.
+ */
+export function eventsIn(records: ArtifactRecord[], opts: { allowLegacy?: boolean } = {}): EntityEvent[] | undefined {
+  const keys = opts.allowLegacy ? [ENTITY_EVENTS_KEY, ...LEGACY_EVENTS_KEYS] : [ENTITY_EVENTS_KEY];
+  for (const key of keys) {
+    const r = records.find((x) => keyOf(x) === key);
+    if (r) return (r.value as { events: EntityEvent[] }).events ?? [];
+  }
+  return undefined;
 }
 
 /** Links a person confirmed for ambiguous entity successions on this commit. */

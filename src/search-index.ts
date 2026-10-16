@@ -10,7 +10,8 @@ import type { Git } from "./git.ts";
 import type { Repo } from "./repo.ts";
 import { NOTES_REF } from "./store.ts";
 
-const SCHEMA = "1";
+/** Bumped whenever documents or embeddings change shape; an older index rebuilds itself. 2: stemming (#6). */
+const SCHEMA = "2";
 
 export interface Doc {
   kind: "commit" | "entity";
@@ -141,7 +142,7 @@ async function build(db: Database, git: Git, tip: string): Promise<void> {
         const intent = (resolveIntent(records)?.value as { text?: string } | undefined)?.text ?? "";
         docs.push({ kind: "commit", name: null, path: null, commit: object, text: `${intent}\n${changes.subject}` });
 
-        for (const e of eventsIn(records) ?? []) {
+        for (const e of eventsIn(records, { allowLegacy: true }) ?? []) {
           if (e.type === "removed") continue;
           const names = e.type === "ambiguous" ? (e.candidates ?? []).map((c) => ({ name: c.name, path: c.path })) : [{ name: e.name, path: e.path }];
           for (const target of names) {

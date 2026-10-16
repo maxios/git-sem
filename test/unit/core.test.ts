@@ -9,6 +9,7 @@ import {
 } from "../../src/artifacts.ts";
 import { parseRawZ } from "../../src/changes.ts";
 import { provenanceLine } from "../../src/commands/format.ts";
+import { eventsIn } from "../../src/entity-git.ts";
 import { installBlock, HOOK_BEGIN } from "../../src/commands/init.ts";
 
 function intent(over: Partial<ArtifactRecord>): ArtifactRecord {
@@ -140,5 +141,24 @@ describe("provenance lines", () => {
         expect(line).toMatch(new RegExp(`^${kind} +${source} +engine=`));
       }
     }
+  });
+});
+
+describe("entity event versions", () => {
+  const legacy = intent({
+    kind: "entity-events",
+    source: "derived",
+    engine: "core",
+    model: "none",
+    prompt: "entities/v1",
+    value: { events: [{ type: "added", name: "retryWithBackoff", path: "src/net.ts", tier: 0 }] },
+  });
+
+  test("lineage ignores old event records so they are recomputed", () => {
+    expect(eventsIn([legacy])).toBeUndefined();
+  });
+
+  test("the search index still reads them, so upgrading does not hide entities", () => {
+    expect(eventsIn([legacy], { allowLegacy: true })?.map((e) => e.name)).toEqual(["retryWithBackoff"]);
   });
 });
