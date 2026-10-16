@@ -9,6 +9,7 @@ import { describe, test } from "bun:test";
 import { join, resolve } from "node:path";
 import "./steps/repository.ts";
 import "./steps/assertions.ts";
+import "./steps/entities.ts";
 import { loadFeatures, tagsOf } from "./support/gherkin.ts";
 import { runStep } from "./support/registry.ts";
 import { World } from "./support/world.ts";

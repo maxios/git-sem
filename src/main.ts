@@ -1,4 +1,5 @@
 import { commitCommand } from "./commands/commit.ts";
+import { entityCommand, whyCommand } from "./commands/entity.ts";
 import { indexCommand } from "./commands/index-cmd.ts";
 import { initCommand } from "./commands/init.ts";
 import { intentCommand } from "./commands/intent.ts";
@@ -35,6 +36,13 @@ read side (lookup only)
     --provenance           every artifact with engine, model, prompt, tier, time
   status                   queue, engine and indexer state
 
+entities (functions, classes, methods)
+  entity <name>            lineage across renames and moves
+    --worlds               the entity at the tip of every branch
+  entity confirm <commit> <from> <to>
+                           settle an ambiguous succession
+  why <name>               why it exists, from recorded intents only
+
 judgment (yours)
   commit                   commit with a history-aware draft in your editor
     --no-edit              commit the draft as is
@@ -56,6 +64,8 @@ type Command = (args: string[]) => Promise<number>;
 const COMMANDS: Record<string, Command> = {
   init: initCommand,
   commit: commitCommand,
+  entity: entityCommand,
+  why: whyCommand,
   index: indexCommand,
   log: logCommand,
   show: showCommand,

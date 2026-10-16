@@ -1,22 +1,36 @@
-@F6 @wip
+@F6
 Feature: Cross-world entity identity
   As a developer
   I want an entity tracked through renames and moves
   So that history follows the thing, not the filename
 
+  Background:
+    Given a git repository with the semantic layer initialized
+    And the semantic engine is the test engine with model "m1"
+    And background indexing is disabled
+    And I commit "api/user.ts" with a function "fetchUser"
+    And I run "git sem index"
+
   Scenario: Rename and move are recognized
-    Given function "fetchUser" in "api/user.ts"
-    When it is renamed to "loadUser" and moved to "services/user.ts"
-    Then the layer links both as the same entity
-    And the link was resolved at Tier 0 or Tier 1 without an LLM call
+    Given I rename the function "fetchUser" to "loadUser" and move it to "services/user.ts"
+    And I run "git sem index"
+    When I run "git sem entity loadUser"
+    Then the entity "loadUser" is linked to "fetchUser" in "api/user.ts"
+    And the lineage of "loadUser" needed no tier above 1
+    And the last command did not invoke the engine
 
   Scenario: Same entity diverged across branches
-    Given "loadUser" was modified differently on branches A and B
+    Given I rename the function "fetchUser" to "loadUser" and move it to "services/user.ts"
+    And branch "a" changes the function "loadUser" to return "from a"
+    And branch "b" changes the function "loadUser" to return "from b"
     When I run "git sem entity loadUser --worlds"
-    Then I see each branch's version of the entity side by side
+    Then branches "a" and "b" each show their own version of "loadUser"
 
   Scenario: Ambiguous identity is surfaced, not decided
-    Given two candidates match an entity with similar confidence
-    When I query the entity's history
-    Then both candidates are shown with confidence
-    And I can confirm the correct link
+    Given I replace the function "fetchUser" with two copies named "loadUser" and "getUser"
+    And I run "git sem index"
+    When I run "git sem entity loadUser"
+    Then the output lists both "loadUser" and "getUser" as candidates with confidence
+    And the entity "loadUser" is not linked to "fetchUser"
+    When I run "git sem entity confirm HEAD fetchUser loadUser"
+    Then the entity "loadUser" is linked to "fetchUser" in "api/user.ts"

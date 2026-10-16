@@ -49,6 +49,8 @@ export interface RepoHandle {
 export class World {
   readonly repos = new Map<string, RepoHandle>();
   readonly remotes = new Map<string, string>();
+  /** Where each function created by a step lives, by name. */
+  readonly functions = new Map<string, string>();
   last?: LastRun;
   private currentName?: string;
   private changeCounter = 0;
