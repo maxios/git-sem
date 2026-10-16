@@ -110,16 +110,31 @@ function shortName(name: string): string {
   return name.split(".").pop()!;
 }
 
-/** Newest commit on a side whose diff adds or removes a use of `word`. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * git arguments that find commits changing how often `word` appears. `-S` is
+ * a plain string match, so it behaves the same on every platform: regex
+ * syntax such as `\b` is a GNU extension that macOS's regex library lacks.
+ * Word boundaries are checked afterwards in TypeScript.
+ */
+export function pickaxeArgs(word: string): string[] {
+  return ["-S", word];
+}
+
+/** Newest commit on a side whose diff adds a use of `word` as a whole word. */
 async function commitUsing(git: Git, base: string, tip: string, word: string): Promise<{ commit: string; path: string } | null> {
-  const r = await git.run(["log", "--format=%x1e%H", "--name-only", "-G", `\\b${word}\\b`, `${base}..${tip}`, "--"], { allowFail: true });
+  const r = await git.run(["log", "--format=%x1e%H", "--name-only", ...pickaxeArgs(word), `${base}..${tip}`, "--"], { allowFail: true });
+  const whole = new RegExp(`(^|[^\\w$])${escapeRegExp(word)}($|[^\\w$])`);
   for (const raw of r.stdout.split("\x1e")) {
     const [commit, ...files] = raw.trim().split("\n").filter(Boolean);
     if (!commit) continue;
     const path = files.find((f) => languageOf(f)) ?? files[0];
     if (!path) continue;
     const added = (await git.run(["diff", "-U0", `${commit}^`, commit, "--", path], { allowFail: true })).stdout;
-    if (added.split("\n").some((l) => l.startsWith("+") && !l.startsWith("+++") && new RegExp(`\\b${word}\\b`).test(l))) {
+    if (added.split("\n").some((l) => l.startsWith("+") && !l.startsWith("+++") && whole.test(l.slice(1)))) {
       return { commit, path };
     }
   }
