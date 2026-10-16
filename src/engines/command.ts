@@ -44,11 +44,14 @@ export function commandEngine(opts: CommandEngineOptions): Engine {
       } catch {
         throw new EngineError(`engine printed invalid JSON: ${r.stdout.slice(0, 200)}`);
       }
-      const out = parsed as { text?: unknown; confidence?: unknown };
+      const out = parsed as { text?: unknown; confidence?: unknown; questions?: unknown };
       if (typeof out.text !== "string" || out.text.trim() === "") {
         throw new EngineError("engine response is missing a non-empty `text`");
       }
-      return { text: out.text.trim(), confidence: clampConfidence(out.confidence) };
+      const questions = Array.isArray(out.questions)
+        ? out.questions.filter((q): q is string => typeof q === "string" && q.trim() !== "").map((q) => q.trim())
+        : undefined;
+      return { text: out.text.trim(), confidence: clampConfidence(out.confidence), questions };
     },
   };
 }

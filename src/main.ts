@@ -1,3 +1,4 @@
+import { commitCommand } from "./commands/commit.ts";
 import { indexCommand } from "./commands/index-cmd.ts";
 import { initCommand } from "./commands/init.ts";
 import { intentCommand } from "./commands/intent.ts";
@@ -35,6 +36,10 @@ read side (lookup only)
   status                   queue, engine and indexer state
 
 judgment (yours)
+  commit                   commit with a history-aware draft in your editor
+    --no-edit              commit the draft as is
+    --draft                print the draft only (commits and stores nothing)
+    -- <git commit args>   passed through to git commit
   intent --staged          propose an intent for staged changes (not stored)
   intent [<rev>]           show the current intent
   intent <rev> --set TEXT  record your own intent
@@ -50,6 +55,7 @@ type Command = (args: string[]) => Promise<number>;
 
 const COMMANDS: Record<string, Command> = {
   init: initCommand,
+  commit: commitCommand,
   index: indexCommand,
   log: logCommand,
   show: showCommand,

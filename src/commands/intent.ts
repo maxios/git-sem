@@ -1,21 +1,13 @@
 import { parseArgs } from "node:util";
 import { intentKeyFor, keyOf, now, resolveIntent, type ArtifactRecord } from "../artifacts.ts";
-import { stagedChanges, stagedDiff } from "../changes.ts";
 import { readConfig } from "../config.ts";
-import { identityOf, resolveEngine } from "../engines/index.ts";
+import { buildDraft } from "../draft.ts";
+import { resolveEngine } from "../engines/index.ts";
 import { UserError } from "../errors.ts";
-import type { Git } from "../git.ts";
 import { openRepo } from "../repo.ts";
 import { ArtifactStore } from "../store.ts";
-import { currentIdentity } from "./context.ts";
+import { authorOf, currentIdentity } from "./context.ts";
 import { intentBadge, intentView } from "./format.ts";
-
-async function authorOf(git: Git): Promise<string> {
-  const email = await git.run(["config", "user.email"], { allowFail: true });
-  if (email.stdout.trim()) return email.stdout.trim();
-  const name = await git.run(["config", "user.name"], { allowFail: true });
-  return name.stdout.trim() || "unknown";
-}
 
 function authoredRecord(object: string, text: string, author: string, evidence: string[]): ArtifactRecord {
   return {
@@ -61,29 +53,21 @@ export async function intentCommand(args: string[]): Promise<number> {
     if (positionals.length || values.set !== undefined || values.accept) {
       throw new UserError("--staged cannot be combined with a revision, --set or --accept");
     }
-    const changes = await stagedChanges(repo.git);
-    if (changes.length === 0) throw new UserError("nothing staged");
     const engine = resolveEngine(await readConfig(repo.git), repo.root);
-    const proposal = await engine.proposeIntent({
-      protocol: 1,
-      task: "intent",
-      model: engine.model,
-      promptVersion: engine.promptVersion,
-      commit: null,
-      subject: "",
-      body: "",
-      changes,
-      diff: engine.wantsDiff ? await stagedDiff(repo.git) : "",
-    });
+    const draft = await buildDraft(repo.git, engine);
+    if (!draft) throw new UserError("nothing staged");
     if (values.json) {
-      console.log(JSON.stringify({ proposal, engine: identityOf(engine), tier: engine.tier }, null, 2));
-    } else {
-      console.log(`Proposed intent: ${proposal.text}`);
-      console.log(
-        `  confidence ${proposal.confidence.toFixed(2)} · engine=${engine.id} model=${engine.model} prompt=${engine.promptVersion}`,
-      );
-      console.log("  Not stored. After committing, keep it with `git sem intent HEAD --set <text>` or `--accept`.");
+      console.log(JSON.stringify(draft, null, 2));
+      return 0;
     }
+    const { proposal } = draft;
+    console.log(`Proposed intent: ${proposal.text}`);
+    console.log(
+      `  confidence ${proposal.confidence.toFixed(2)} · engine=${engine.id} model=${engine.model} prompt=${engine.promptVersion}`,
+    );
+    for (const r of draft.reversals) console.log(`  WARNING: reverts ${r.commit.slice(0, 7)} "${r.subject}" on ${r.path}`);
+    for (const q of draft.questions) console.log(`  ? ${q}`);
+    console.log("  Not stored. Use `git sem commit` to commit with this draft.");
     return 0;
   }
 

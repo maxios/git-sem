@@ -67,6 +67,10 @@ step("the test engine takes {int} milliseconds to respond", async (w: World, del
   await w.git(["config", "sem.command", fakeEngineCommand(w, delayMs)]);
 });
 
+step("the semantic engine is the heuristic engine", async (w: World) => {
+  await w.git(["config", "sem.engine", "heuristic"]);
+});
+
 step("the semantic engine model is changed to {string}", async (w: World, model: string) => {
   await w.git(["config", "sem.model", model]);
 });
@@ -123,6 +127,13 @@ step("I commit {string} with content {string}", async (w: World, path: string, c
 
 step("I stage a change to {string}", async (w: World, path: string) => {
   await touch(w, path);
+});
+
+step("I stage {string} with content {string}", async (w: World, path: string, content: string) => {
+  const full = join(w.current.dir, path);
+  await mkdir(dirname(full), { recursive: true });
+  await writeFile(full, `${content}\n`);
+  await w.git(["add", "--", path]);
 });
 
 step("I tag the latest commit as {string}", async (w: World, tag: string) => {

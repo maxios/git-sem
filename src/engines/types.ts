@@ -13,12 +13,21 @@ export interface IntentInput {
   changes: ChangeEntry[];
   /** Unified diff, possibly truncated; empty when the engine does not want it. */
   diff: string;
+  /**
+   * Drafting only: recent commits that touched the same files, with their
+   * recorded intents. Lets a model write with context instead of guessing.
+   */
+  history?: Array<{ commit: string; subject: string; intent: string | null; source: string | null; paths: string[] }>;
+  /** Drafting only: past commits this change exactly undoes, detected at Tier 0. */
+  reversals?: Array<{ path: string; commit: string; subject: string; intent: string | null }>;
 }
 
 export interface IntentProposal {
   text: string;
   /** 0..1 */
   confidence: number;
+  /** What the engine could not know and wants the author to answer. */
+  questions?: string[];
 }
 
 /**

@@ -207,6 +207,54 @@ step("the newest log entry is marked {string}", async (w: World, status: string)
   expect(last(w).stdout.split("\n")[0]).toContain(status);
 });
 
+// ── drafting ────────────────────────────────────────────────────────
+
+async function lastEngineCall(w: World): Promise<{ history: string[] }> {
+  const lines = (await readFile(w.current.engineLog, "utf8").catch(() => "")).split("\n").filter(Boolean);
+  const lastLine = lines.at(-1);
+  if (!lastLine) throw new Error("the engine was never invoked");
+  return JSON.parse(lastLine) as { history: string[] };
+}
+
+step("the engine received the intent {string} as history", async (w: World, text: string) => {
+  expect((await lastEngineCall(w)).history).toContain(text);
+});
+
+step("the engine did not receive the intent {string} as history", async (w: World, text: string) => {
+  expect((await lastEngineCall(w)).history).not.toContain(text);
+});
+
+step("the output contains {string}", (w: World, text: string) => {
+  expect(last(w).stdout).toContain(text);
+});
+
+step("the last command invoked the engine {int} time(s)", (w: World, n: number) => {
+  const r = last(w);
+  expect(r.engineCallsAfter - r.engineCallsBefore).toBe(n);
+});
+
+step("the draft warns that it reverts the commit {string}", async (w: World, subject: string) => {
+  const short = (await w.commitBySubject(subject)).slice(0, 7);
+  expect(last(w).stdout).toMatch(new RegExp(`WARNING: this reverts ${short}`));
+});
+
+step("the draft asks why the change was made", (w: World) => {
+  const out = last(w).stdout;
+  const questions = out.slice(out.indexOf("# Questions for you:"));
+  expect(out).toContain("# Questions for you:");
+  expect(questions).toMatch(/^#\s+- Why /m);
+});
+
+step("there are no commits yet", async (w: World) => {
+  expect((await w.exec("git rev-parse --verify --quiet HEAD")).code).not.toBe(0);
+});
+
+step("the message of HEAD has no comment lines", async (w: World) => {
+  const message = (await w.git(["log", "-1", "--format=%B"])).stdout;
+  expect(message.trim().length).toBeGreaterThan(0);
+  expect(message.split("\n").filter((l) => l.startsWith("#"))).toEqual([]);
+});
+
 // ── provenance ──────────────────────────────────────────────────────
 
 step("the output shows the object hash of {word}", async (w: World, rev: string) => {

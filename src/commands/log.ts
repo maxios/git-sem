@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { keyOf, parseNote, resolveIntent, type ChangeEntry, type ChangesValue } from "../artifacts.ts";
+import { firstLine } from "../draft.ts";
 import { CHANGES_KEY } from "../indexer.ts";
 import { openRepo } from "../repo.ts";
 import { NOTES_REF } from "../store.ts";
@@ -69,7 +70,7 @@ export async function logCommand(args: string[]): Promise<number> {
       console.log(`${short(e.commit)}  pending  ${e.subject}`);
       continue;
     }
-    console.log(`${short(e.commit)}  ${e.intent.text}  ${intentBadge(e.intent)}`);
+    console.log(`${short(e.commit)}  ${firstLine(e.intent.text)}  ${intentBadge(e.intent)}`);
     for (const p of e.paths) {
       console.log(`         ${p.status} ${p.from ? `${p.from} -> ` : ""}${p.path}`);
     }

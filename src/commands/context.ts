@@ -1,4 +1,5 @@
 import type { EngineIdentity } from "../artifacts.ts";
+import type { Git } from "../git.ts";
 import { readConfig } from "../config.ts";
 import { identityOf, resolveEngine } from "../engines/index.ts";
 import type { Repo } from "../repo.ts";
@@ -14,4 +15,11 @@ export async function currentIdentity(repo: Repo): Promise<EngineIdentity | unde
   } catch {
     return undefined;
   }
+}
+
+/** Who to record as the author of an authored intent: user.email, else user.name. */
+export async function authorOf(git: Git): Promise<string> {
+  const email = (await git.run(["config", "user.email"], { allowFail: true })).stdout.trim();
+  if (email) return email;
+  return (await git.run(["config", "user.name"], { allowFail: true })).stdout.trim() || "unknown";
 }

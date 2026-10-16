@@ -15,6 +15,7 @@ interface Input {
   commit: string | null;
   subject: string;
   changes: Array<{ path: string }>;
+  history?: Array<{ intent: string | null }>;
 }
 
 const logFile = process.argv[2];
@@ -26,7 +27,8 @@ if (!logFile) {
 const delayMs = Number(process.argv[3] ?? 0);
 const input = JSON.parse(await Bun.stdin.text()) as Input;
 if (delayMs > 0) await Bun.sleep(delayMs);
-appendFileSync(logFile, `${JSON.stringify({ commit: input.commit, model: input.model, prompt: input.promptVersion })}\n`);
+const history = (input.history ?? []).map((h) => h.intent).filter((t): t is string => t !== null);
+appendFileSync(logFile, `${JSON.stringify({ commit: input.commit, model: input.model, prompt: input.promptVersion, history })}\n`);
 
 const subject = input.subject || "staged change";
 const paths = input.changes.map((c) => c.path).join(", ");
