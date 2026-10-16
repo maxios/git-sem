@@ -65,6 +65,11 @@ step("the top search result is the entity {string} on branch {string}", async (w
   expect(top?.branches).toContain(branch);
 });
 
+step("the top search result is the commit {string}", async (w: World, subject: string) => {
+  const [top] = (await lastSearch(w)).results;
+  expect(top).toMatchObject({ kind: "commit", commit: await w.commitBySubject(subject) });
+});
+
 step("each search result shows its commit, branch and similarity", (w: World) => {
   const lines = (w.last?.stdout ?? "").split("\n").filter(Boolean);
   expect(lines.length).toBeGreaterThan(0);

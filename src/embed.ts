@@ -10,13 +10,36 @@ export const DIM = 512;
 
 const STOPWORDS = new Set(["the", "a", "an", "of", "to", "and", "or", "in", "on", "for", "is", "it", "this", "that", "be", "as", "at", "by"]);
 
+/**
+ * A light, deterministic stemmer so different forms of a word share a
+ * dimension (#6): undoes/undo, retries/retry, journals/journal,
+ * caching/cached/cache. Not linguistically complete; it only has to map
+ * related forms to the same key on both the query and the document side.
+ */
+export function stem(word: string): string {
+  let w = word;
+  if (w.length <= 3 || /^\d/.test(w)) return w;
+  if (w.endsWith("ies") && w.length > 4) w = `${w.slice(0, -3)}y`;
+  else if (w.endsWith("sses")) w = w.slice(0, -2);
+  else if (/(oes|[sxz]es|[cs]hes)$/.test(w)) w = w.slice(0, -2);
+  else if (w.endsWith("s") && !w.endsWith("ss") && !w.endsWith("us")) w = w.slice(0, -1);
+  else if (w.endsWith("ing") && w.length > 5) w = w.slice(0, -3);
+  else if (w.endsWith("ed") && w.length > 4) w = w.slice(0, -2);
+  // running -> run, stopped -> stop
+  if (/([^aeiouflsz])\1$/.test(w) && w.length > 3) w = w.slice(0, -1);
+  // cache/cached/caching all end as "cach"
+  if (w.endsWith("e") && w.length > 4) w = w.slice(0, -1);
+  return w;
+}
+
 export function words(text: string): string[] {
   return text
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((w) => w.length > 1 && !STOPWORDS.has(w));
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w))
+    .map(stem);
 }
 
 function fnv1a(s: string): number {

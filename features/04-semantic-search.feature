@@ -33,3 +33,10 @@ Feature: Semantic search across history and branches
     And I run "git sem index"
     When I run "git sem search 'playground demo'"
     Then the search results include "playgroundDemo" labeled "playground"
+
+  Scenario: Search matches other forms of a word
+    Given I commit a change to "src/editor.ts" with message "editor: a source that journals and undoes"
+    And I commit a change to "src/billing.ts" with message "billing: monthly invoices"
+    And I run "git sem index"
+    When I run "git sem search 'undo history'"
+    Then the top search result is the commit "editor: a source that journals and undoes"
