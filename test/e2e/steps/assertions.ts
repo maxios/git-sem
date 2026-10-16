@@ -56,9 +56,18 @@ step("the commit succeeds", (w: World) => {
   expect(last(w).code).toBe(0);
 });
 
-step("the commit took less than {int} milliseconds", (w: World, limit: number) => {
+step("the commit/command took less than {int} milliseconds", (w: World, limit: number) => {
   expect(last(w).ms).toBeLessThan(limit);
 });
+
+/** Poll until the check passes, for work happening in the background. */
+async function eventually(what: string, check: () => Promise<boolean>, timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error(`timed out after ${timeoutMs}ms waiting for: ${what}`);
+    await Bun.sleep(50);
+  }
+}
 
 step("the commit is queued for indexing", async (w: World) => {
   expect(await queued(w)).toContain(await w.revParse("HEAD"));
@@ -104,13 +113,29 @@ step("every commit on the current branch has an intent", async (w: World) => {
 });
 
 step("the latest commit is eventually indexed", async (w: World) => {
-  const deadline = Date.now() + 15_000;
-  for (;;) {
-    const show = await w.sem<ShowJson>("show HEAD");
-    if (show.intent) return;
-    if (Date.now() > deadline) throw new Error("HEAD was not indexed within 15s");
-    await Bun.sleep(100);
-  }
+  await eventually("HEAD to be indexed", async () => (await w.sem<ShowJson>("show HEAD")).intent !== null);
+});
+
+step("every commit on the current branch eventually has an intent", async (w: World) => {
+  await eventually("every commit to have an intent", async () => {
+    const log = await w.sem<LogEntry[]>("log");
+    return log.length > 0 && log.every((e) => e.intent !== null);
+  });
+});
+
+step("the commit {string} eventually has an intent from model {string}", async (w: World, subject: string, model: string) => {
+  const commit = await w.commitBySubject(subject);
+  await eventually(`"${subject}" to have an intent from ${model}`, async () => {
+    const show = await w.sem<ShowJson>(`show ${commit}`);
+    return intentsOf(show).some((a) => a.model === model);
+  });
+});
+
+step("git sem status eventually reports indexing progress out of {int}", async (w: World, total: number) => {
+  await eventually(`status to report progress out of ${total}`, async () => {
+    const status = await w.sem<{ indexing: boolean; progress: { done: number; total: number } | null }>("status");
+    return status.indexing && status.progress?.total === total;
+  });
 });
 
 // ── intents ─────────────────────────────────────────────────────────

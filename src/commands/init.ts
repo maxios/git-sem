@@ -1,6 +1,8 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { parseArgs } from "node:util";
 import { openRepo } from "../repo.ts";
+import { enqueueInBackground, revList } from "./index-cmd.ts";
 
 export const HOOK_BEGIN = "# >>> git-sem >>>";
 export const HOOK_END = "# <<< git-sem <<<";
@@ -29,7 +31,8 @@ export function installBlock(existing: string | undefined): string {
   return `${existing.replace(/\n*$/, "\n")}\n${HOOK_BLOCK}\n`;
 }
 
-export async function initCommand(_args: string[]): Promise<number> {
+export async function initCommand(args: string[]): Promise<number> {
+  const { values } = parseArgs({ args, options: { backfill: { type: "boolean" } } });
   const repo = await openRepo();
   const hookPath = await repo.git.out(["rev-parse", "--path-format=absolute", "--git-path", "hooks/post-commit"]);
 
@@ -47,5 +50,15 @@ export async function initCommand(_args: string[]): Promise<number> {
   hook     ${hookPath}
   notes    refs/notes/sem (merge: cat_sort_uniq)
   state    ${repo.semDir}`);
+
+  if (values.backfill) {
+    const history = (await repo.git.resolve("HEAD")) ? await revList(repo.git, ["HEAD"]) : [];
+    if (history.length === 0) {
+      console.log("  backfill nothing to index yet");
+    } else {
+      const n = await enqueueInBackground(repo, history);
+      console.log(`  backfill ${n} commit${n === 1 ? "" : "s"} queued; indexing in the background (see \`git sem status\`)`);
+    }
+  }
   return 0;
 }

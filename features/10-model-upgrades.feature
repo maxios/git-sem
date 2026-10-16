@@ -36,8 +36,16 @@ Feature: Model upgrades
     And the commit "two" has no intent from model "m2"
     And the commit "one" has an intent from model "m1"
 
-  @wip
   Scenario: Backfill runs in the background
-    When I run "git sem index --since v2.0 --background"
-    Then the command returns immediately
-    And the backfill completes in the background
+    Given I commit a change to "one.ts" with message "one"
+    And I tag the latest commit as "v2.0"
+    And I commit a change to "two.ts" with message "two"
+    And I commit a change to "three.ts" with message "three"
+    And I run "git sem index"
+    When the semantic engine model is changed to "m2"
+    And the test engine takes 800 milliseconds to respond
+    And I run "git sem index --since v2.0 --background"
+    Then the command took less than 1000 milliseconds
+    And the commit "three" eventually has an intent from model "m2"
+    And the commit "two" eventually has an intent from model "m2"
+    And the commit "one" has no intent from model "m2"

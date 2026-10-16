@@ -14,6 +14,19 @@ step("a git repository with the semantic layer initialized", async (w: World) =>
   await w.must("git sem init");
 });
 
+step("a git repository with {int} existing commits", async (w: World, n: number) => {
+  const dir = join(w.root, "repo");
+  await mkdir(dir);
+  w.addRepo("main", dir);
+  w.use("main");
+  await w.git(["init", "--quiet"]);
+  for (let i = 1; i <= n; i++) {
+    await writeFile(join(dir, `module${i}.ts`), `export const m${i} = ${i};\n`);
+    await w.git(["add", "--", `module${i}.ts`]);
+    await w.git(["commit", "--quiet", "-m", `Add module ${i}`]);
+  }
+});
+
 step("a shared remote {string}", async (w: World, name: string) => {
   const bare = join(w.root, `${name}.git`);
   const seed = join(w.root, `${name}-seed`);
