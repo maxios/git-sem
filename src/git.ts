@@ -1,4 +1,4 @@
-import { spawnBytes, spawnText, type RunResult } from "./proc.ts";
+import { spawnText, type RunResult } from "./proc.ts";
 
 export interface GitRunOptions {
   input?: string;
@@ -28,12 +28,6 @@ export class Git {
   /** Run and return trimmed stdout; throws on failure. */
   async out(args: string[], opts: Omit<GitRunOptions, "allowFail"> = {}): Promise<string> {
     return (await this.run(args, opts)).stdout.trim();
-  }
-
-  async bytes(args: string[]): Promise<Uint8Array> {
-    const { bytes, code } = await spawnBytes(["git", ...args], this.cwd);
-    if (code !== 0) throw new GitError(args, { stdout: "", stderr: "", code, timedOut: false });
-    return bytes;
   }
 
   /** Resolve a revision to a full object id, or undefined if it does not exist. */

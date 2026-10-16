@@ -7,14 +7,17 @@ import {
   type ChangesValue,
   type FileValue,
 } from "./artifacts.ts";
+import { NotesBatch, resolveCommits } from "./batch.ts";
 import { commitChanges, commitDiff, isRegularFile } from "./changes.ts";
 import { identityOf, type Engine } from "./engines/index.ts";
 import { messageOf } from "./errors.ts";
 import type { Git } from "./git.ts";
-import { ArtifactStore } from "./store.ts";
 
 export const CHANGES_KEY = "changes:derived:core:none:changes/v1";
 export const FILE_KEY = "file:derived:core:none:file/v1";
+
+/** Commits between note flushes; bounds memory and work lost on a crash. */
+const FLUSH_EVERY = 200;
 
 export interface CommitMeta {
   hash: string;
@@ -32,6 +35,8 @@ export interface IndexStats {
   startedAt: string;
   finishedAt: string;
 }
+
+export type Progress = (done: number, total: number) => void;
 
 export function emptyStats(engine: Engine): IndexStats {
   const t = now();
@@ -84,44 +89,49 @@ export async function readCommitMeta(git: Git, commits: string[]): Promise<Map<s
  *     └─► intent  (engine tier, inferred; keyed by engine+model+prompt)
  */
 export class Indexer {
-  private readonly store: ArtifactStore;
-
   constructor(
     private readonly git: Git,
     private readonly engine: Engine,
-  ) {
-    this.store = new ArtifactStore(git);
-  }
+  ) {}
 
-  async run(commits: string[]): Promise<IndexStats> {
+  async run(commits: string[], onProgress?: Progress): Promise<IndexStats> {
     const stats = emptyStats(this.engine);
+    const unique = [...new Set(commits)];
+    const resolved = await resolveCommits(this.git, unique);
     const ids: string[] = [];
-    for (const c of new Set(commits)) {
-      const id = await this.git.resolve(`${c}^{commit}`);
+    for (const rev of unique) {
+      const id = resolved.get(rev);
       if (id) ids.push(id);
-      else stats.failed.push({ commit: c, error: "not a commit in this repository" });
+      else stats.failed.push({ commit: rev, error: "not a commit in this repository" });
     }
 
     const metas = await readCommitMeta(this.git, ids);
-    for (const id of ids) {
-      const meta = metas.get(id);
-      if (!meta) {
-        stats.failed.push({ commit: id, error: "commit metadata unavailable" });
-        continue;
+    const notes = await NotesBatch.open(this.git);
+    try {
+      for (const [i, id] of ids.entries()) {
+        const meta = metas.get(id);
+        if (!meta) {
+          stats.failed.push({ commit: id, error: "commit metadata unavailable" });
+          continue;
+        }
+        try {
+          await this.indexCommit(meta, notes, stats);
+          stats.commits++;
+        } catch (e) {
+          stats.failed.push({ commit: id, error: messageOf(e) });
+        }
+        if (notes.size >= FLUSH_EVERY) await notes.flush();
+        onProgress?.(i + 1, ids.length);
       }
-      try {
-        await this.indexCommit(meta, stats);
-        stats.commits++;
-      } catch (e) {
-        stats.failed.push({ commit: id, error: messageOf(e) });
-      }
+    } finally {
+      await notes.close();
     }
     stats.finishedAt = now();
     return stats;
   }
 
-  private async indexCommit(meta: CommitMeta, stats: IndexStats): Promise<void> {
-    const existing = await this.store.read(meta.hash);
+  private async indexCommit(meta: CommitMeta, notes: NotesBatch, stats: IndexStats): Promise<void> {
+    const existing = await notes.read(meta.hash);
     const fresh: ArtifactRecord[] = [];
 
     try {
@@ -131,7 +141,7 @@ export class Indexer {
 
       for (const entry of changes) {
         if (!entry.blob || !isRegularFile(entry)) continue;
-        if (await this.ensureFile(entry.blob)) stats.files.reused++;
+        if (await this.ensureFile(entry.blob, notes)) stats.files.reused++;
         else stats.files.computed++;
       }
 
@@ -144,7 +154,7 @@ export class Indexer {
       }
     } finally {
       // Keep whatever was derived even if the engine failed.
-      if (fresh.length) await this.store.add(meta.hash, fresh);
+      if (fresh.length) await notes.add(meta.hash, fresh);
     }
   }
 
@@ -196,11 +206,11 @@ export class Indexer {
   }
 
   /** Returns true if the blob already had a file artifact (reused), false if it was computed now. */
-  private async ensureFile(blob: string): Promise<boolean> {
-    const existing = await this.store.read(blob);
+  private async ensureFile(blob: string, notes: NotesBatch): Promise<boolean> {
+    const existing = await notes.read(blob);
     if (existing.some((r) => keyOf(r) === FILE_KEY)) return true;
 
-    const bytes = await this.git.bytes(["cat-file", "blob", blob]);
+    const bytes = (await notes.cat.read(blob)) ?? new Uint8Array(0);
     let lines = 0;
     let binary = false;
     for (let i = 0; i < bytes.length; i++) {
@@ -211,7 +221,7 @@ export class Indexer {
     if (bytes.length > 0 && bytes[bytes.length - 1] !== 10) lines++;
 
     const value: FileValue = { bytes: bytes.length, lines: binary ? 0 : lines, binary };
-    await this.store.add(blob, [
+    await notes.add(blob, [
       {
         v: 1,
         kind: "file",

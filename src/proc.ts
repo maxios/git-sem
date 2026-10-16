@@ -32,8 +32,16 @@ export async function spawnText(cmd: string[], opts: SpawnOptions): Promise<RunR
 
   if (opts.input !== undefined) {
     const sink = proc.stdin as unknown as FileSink;
-    sink.write(opts.input);
-    await sink.end();
+    try {
+      // write() may return a promise when the pipe is full; awaiting it keeps
+      // a late EPIPE inside this try instead of surfacing as an unhandled rejection.
+      await sink.write(opts.input);
+      await sink.end();
+    } catch (e) {
+      // A child may exit without reading its input (e.g. an engine that
+      // ignores stdin). Its exit code and output decide success, not us.
+      if ((e as NodeJS.ErrnoException).code !== "EPIPE") throw e;
+    }
   }
 
   let timedOut = false;
@@ -51,11 +59,4 @@ export async function spawnText(cmd: string[], opts: SpawnOptions): Promise<RunR
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-/** Spawn a process and collect stdout as raw bytes. */
-export async function spawnBytes(cmd: string[], cwd: string): Promise<{ bytes: Uint8Array; code: number }> {
-  const proc = Bun.spawn(cmd, { cwd, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-  const [buffer, code] = await Promise.all([new Response(proc.stdout).arrayBuffer(), proc.exited]);
-  return { bytes: new Uint8Array(buffer), code };
 }
