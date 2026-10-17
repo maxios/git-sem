@@ -41,3 +41,17 @@ Feature: Cross-world entity identity
     And I run "git sem index"
     When I run "git sem entity loadUser"
     Then the lineage of "loadUser" reads "renamed, added"
+
+  Scenario: A small function moved to another file keeps its history
+    Given I commit "a.ts" containing:
+      """
+      export function countSlots(range) {
+        let n = 0;
+        each(range, () => n++);
+        return n;
+      }
+      """
+    And I move "a.ts" to "lib/a.ts" replacing "each(" with "forEach("
+    And I run "git sem index"
+    When I run "git sem entity countSlots"
+    Then the lineage of "countSlots" reads "moved, added"

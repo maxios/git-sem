@@ -371,6 +371,13 @@ export const LINK_THRESHOLD = 0.7;
 export const AMBIGUITY_MARGIN = 0.05;
 /** Below this many distinct meaningful tokens a body is too small to tell apart: only exact links. */
 export const MIN_LINK_TOKENS = 6;
+/**
+ * A removed and an added entity with the same name and kind, the only such
+ * pair in the commit, are the same thing moved unless their bodies share
+ * almost nothing. The name is the evidence, so the size floor does not
+ * apply (#11). Cross-name links still need MIN_LINK_TOKENS (#4).
+ */
+export const SAME_NAME_FLOOR = 0.3;
 
 /**
  * Compare entities before and after a commit across all changed files, so a
@@ -442,6 +449,28 @@ export function diffEntities(before: FileVersion[], after: FileVersion[]): Entit
       from: { name: r.name, path: r.path },
       score: round(best.score),
       tier: best.score === 1 ? 0 : 1,
+    });
+  }
+
+  // Same-name moves of small entities that the size floor kept from linking (#11).
+  const unlinked = removed.filter((r) => !linkedOld.has(key(r)));
+  for (const r of unlinked) {
+    const twins = unlinked.filter((x) => x.name === r.name && x.kind === r.kind);
+    const successors = added.filter((a) => !used.has(key(a)) && a.name === r.name && a.kind === r.kind);
+    if (twins.length !== 1 || successors.length !== 1) continue;
+    const a = successors[0]!;
+    const score = a.hash === r.hash ? 1 : similarity(r.body, r.name, a.body, a.name);
+    if (score < SAME_NAME_FLOOR) continue;
+    used.add(key(a));
+    linkedOld.add(key(r));
+    events.push({
+      type: "moved",
+      name: a.name,
+      path: a.path,
+      exported: a.exported,
+      from: { name: r.name, path: r.path },
+      score: round(score),
+      tier: score === 1 ? 0 : 1,
     });
   }
 

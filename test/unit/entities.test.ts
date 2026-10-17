@@ -195,3 +195,40 @@ describe("wrapped signatures (#12)", () => {
     ]);
   });
 });
+
+describe("same-name moves of small entities (#11)", () => {
+  const small = (call: string) => `export function countSlots(range) {\n  let n = 0;\n  ${call}(range, () => n++);\n  return n;\n}\n`;
+
+  test("a short function moved with a small edit is moved, not removed + added", () => {
+    const events = diffEntities([{ path: "a.ts", content: small("each") }], [{ path: "lib/a.ts", content: small("forEach") }]);
+    expect(events).toMatchObject([{ type: "moved", name: "countSlots", path: "lib/a.ts", from: { name: "countSlots", path: "a.ts" }, tier: 1 }]);
+  });
+
+  test("two successors with the same name are not guessed", () => {
+    const events = diffEntities(
+      [{ path: "a.ts", content: small("each") }],
+      [
+        { path: "lib/a.ts", content: small("forEach") },
+        { path: "lib/b.ts", content: small("map") },
+      ],
+    );
+    expect(events.map((e) => `${e.type}:${e.path}`).sort()).toEqual(["added:lib/a.ts", "added:lib/b.ts", "removed:a.ts"]);
+  });
+
+  test("a reused name with an unrelated body is not a move", () => {
+    const events = diffEntities(
+      [{ path: "a.ts", content: small("each") }],
+      [{ path: "b.ts", content: "export function countSlots(box) {\n  return box.width * box.height;\n}\n" }],
+    );
+    expect(events.map((e) => e.type).sort()).toEqual(["added", "removed"]);
+  });
+
+  test("a stronger cross-name link still wins over a weak same-name one", () => {
+    const body = (name: string) => `export function ${name}(id: string) {\n  const row = db.users.find(id);\n  const extra = cache.lookup(row.key, row.region);\n  return row ? row.name : fallback.name;\n}\n`;
+    const events = diffEntities(
+      [{ path: "a.ts", content: body("fetchUser") }],
+      [{ path: "b.ts", content: `${body("loadUser")}\nexport function fetchUser(id) {\n  return legacy.get(id, true);\n}\n` }],
+    );
+    expect(events).toContainEqual(expect.objectContaining({ type: "renamed", name: "loadUser", from: { name: "fetchUser", path: "a.ts" } }));
+  });
+});

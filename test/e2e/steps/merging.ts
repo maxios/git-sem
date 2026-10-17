@@ -157,3 +157,11 @@ step("I commit {string} containing:", async (w: World, path: string, content: st
   await w.git(["add", "-A"]);
   await w.git(["commit", "--quiet", "-m", `Update ${path}`]);
 });
+
+step("I move {string} to {string} replacing {string} with {string}", async (w: World, from: string, to: string, a: string, b: string) => {
+  const text = await readFile(join(w.current.dir, from), "utf8");
+  await w.git(["rm", "--quiet", from]);
+  await write(w, to, text.replace(a, b));
+  await w.git(["add", "-A"]);
+  await w.git(["commit", "--quiet", "-m", `Move ${from} to ${to}`]);
+});
