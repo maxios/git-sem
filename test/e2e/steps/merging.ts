@@ -151,3 +151,9 @@ step("the merge commit records that it was merged despite {int} warning(s)", asy
   expect(decision?.value.outcome).toBe("merged");
   expect(decision?.value.warnings).toHaveLength(n);
 });
+
+step("I commit {string} containing:", async (w: World, path: string, content: string) => {
+  await write(w, path, `${content}\n`);
+  await w.git(["add", "-A"]);
+  await w.git(["commit", "--quiet", "-m", `Update ${path}`]);
+});

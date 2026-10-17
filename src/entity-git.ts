@@ -7,10 +7,12 @@ import type { Git } from "./git.ts";
 /**
  * v2: merges record only their own changes (#2); events carry export status
  * for language-aware checks (#3); Tier 1 links need enough real tokens (#4).
- * v1 records are ignored and recomputed when read.
+ * v3: wrapped signatures are extracted (#12); same-name moves link (#11).
+ * Older records are ignored and recomputed when read.
  */
-export const ENTITY_EVENTS_KEY = "entity-events:derived:core:none:entities/v2";
-export const ENTITIES_KEY = "entities:derived:core:none:entities/v1";
+export const ENTITIES_VERSION = "entities/v3";
+export const ENTITY_EVENTS_KEY = `entity-events:derived:core:none:${ENTITIES_VERSION}`;
+export const ENTITIES_KEY = `entities:derived:core:none:${ENTITIES_VERSION}`;
 export const CHANGES_KEY = "changes:derived:core:none:changes/v1";
 
 export interface EntityLink {
@@ -69,7 +71,7 @@ export function entityEventsRecord(commit: string, events: EntityEvent[]): Artif
     source: "derived",
     engine: "core",
     model: "none",
-    prompt: "entities/v2",
+    prompt: ENTITIES_VERSION,
     tier: events.some((e) => e.tier === 1) ? 1 : 0,
     confidence: 1,
     value: { events },
@@ -86,7 +88,7 @@ export function entitiesRecord(blob: string, entities: Entity[]): ArtifactRecord
     source: "derived",
     engine: "core",
     model: "none",
-    prompt: "entities/v1",
+    prompt: ENTITIES_VERSION,
     tier: 0,
     confidence: 1,
     value: { entities },
@@ -95,7 +97,7 @@ export function entitiesRecord(blob: string, entities: Entity[]): ArtifactRecord
   };
 }
 
-const LEGACY_EVENTS_KEYS = ["entity-events:derived:core:none:entities/v1"];
+const LEGACY_EVENTS_KEYS = ["entity-events:derived:core:none:entities/v2", "entity-events:derived:core:none:entities/v1"];
 
 /**
  * Stored entity events. `allowLegacy` also accepts records from older

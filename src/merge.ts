@@ -138,6 +138,43 @@ export function pickaxeArgs(word: string): string[] {
   return ["-S", word];
 }
 
+/**
+ * Lines that declare `name` (not ones that merely use it): a declaration
+ * keyword before it, a Go method receiver, or a class method header that
+ * opens its body. Calls such as `  name(x);` never match.
+ */
+export const DECLARES = (name: string): RegExp => {
+  const n = escapeRegExp(name);
+  return new RegExp(
+    [
+      `(^|[^\\w$.])(function\\*?|const|let|var|class|interface|type|enum|def|func|fn|struct|trait)\\s+${n}($|[^\\w$])`,
+      `^func\\s*\\([^)]*\\)\\s*${n}\\s*[(\\[]`,
+      `^\\s*(?:(?:public|private|protected|static|async|get|set|override)\\s+)*${n}\\s*(?:<[^>]*>)?\\s*\\([^;]*\\{\\s*$`,
+    ].join("|"),
+  );
+};
+
+/**
+ * Whether a side still declares `entity` at its tip, in any file of the same
+ * language. A safety net under the extractor: if it missed a declaration
+ * (#12), check must not claim the side removed something that is still there.
+ */
+async function stillDeclared(git: Git, tip: string, entity: { name: string; path: string }): Promise<boolean> {
+  const family = familyOf(entity.path);
+  const name = shortName(entity.name);
+  const r = await git.run(["grep", "-n", "-w", "-F", "-e", name, tip, "--"], { allowFail: true });
+  const declares = DECLARES(name);
+  for (const line of r.stdout.split("\n")) {
+    const rest = line.startsWith(`${tip}:`) ? line.slice(tip.length + 1) : line;
+    const match = /^(.*?):\d+:(.*)$/.exec(rest);
+    if (!match) continue;
+    const [, path = "", text = ""] = match;
+    if (family && familyOf(path) !== family) continue;
+    if (declares.test(text)) return true;
+  }
+  return false;
+}
+
 /** Newest commit on a side whose diff adds a use of `word` as a whole word. */
 async function commitUsing(git: Git, base: string, tip: string, word: string): Promise<{ commit: string; path: string } | null> {
   const r = await git.run(["log", "--format=%x1e%H", "--name-only", ...pickaxeArgs(word), `${base}..${tip}`, "--"], { allowFail: true });
@@ -193,6 +230,7 @@ export async function findContradictions(git: Git, sides: Sides): Promise<Warnin
         const old = t.event.from ?? (t.event.type === "removed" ? { name: t.event.name, path: t.event.path } : undefined);
         if (!GONE.has(t.event.type) || !old || (t.event.type !== "removed" && old.name === t.event.name)) continue;
         if (warnings.some((w) => w.kind === "stale-reference" && w.entity === old.name)) continue;
+        if (await stillDeclared(git, gone.tip, old)) continue;
         const use = await commitUsing(git, base, kept.tip, shortName(old.name));
         if (!use) continue;
         const what = t.event.type === "removed" ? `removes ${old.name}` : `renames ${old.name} to ${t.event.name}`;

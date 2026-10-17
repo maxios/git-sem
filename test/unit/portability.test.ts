@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { pickaxeArgs } from "../../src/merge.ts";
+import { DECLARES, pickaxeArgs } from "../../src/merge.ts";
 
 const SRC = join(resolve(import.meta.dir, "../.."), "src");
 
@@ -32,4 +32,26 @@ describe("git regex portability", () => {
     }
     expect(offenders).toEqual([]);
   });
+});
+
+describe("declaration matcher used by check (#12)", () => {
+  const cases: Array<[string, boolean]> = [
+    ["export const pick = (", true],
+    ["function pick(a) {", true],
+    ["export async function pick(a) {", true],
+    ["  pick(a, b) {", true],
+    ["  async pick(a: string): Promise<void> {", true],
+    ["func (s *S) pick(id int) error {", true],
+    ["def pick(", true],
+    ["  pick(1, 2);", false],
+    ["const total = pick(1, 2);", false],
+    ["obj.pick(1)", false],
+    ["// pick is gone", false],
+    ["import { pick } from './lib';", false],
+  ];
+  for (const [line, declares] of cases) {
+    test(`${declares ? "declares" : "only uses"}: ${line}`, () => {
+      expect(DECLARES("pick").test(line)).toBe(declares);
+    });
+  }
 });

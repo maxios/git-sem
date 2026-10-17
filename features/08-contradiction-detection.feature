@@ -70,3 +70,26 @@ Feature: Detect semantic contradictions in clean merges
     And I run "git sem index --all"
     When I run "git sem check a b"
     Then the output contains "No contradictions found"
+
+  Scenario: Reformatting a function is not removing it
+    Given I commit "lib.ts" containing:
+      """
+      export const pick = (a: number, b: number): number => a + b;
+      """
+    And on branch "topic" I commit "use.ts" containing:
+      """
+      import { pick } from "./lib";
+      export const total = pick(1, 2);
+      """
+    And I commit "lib.ts" containing:
+      """
+      export const pick = (
+        a: number,
+        b: number,
+      ): number => a + b;
+      """
+    And I run "git sem index --all"
+    When I run "git sem entity pick"
+    Then the lineage of "pick" reads "modified, added"
+    When I run "git sem check main topic"
+    Then the output contains "No contradictions found"

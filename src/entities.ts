@@ -64,7 +64,7 @@ interface Pattern {
 const BRACE_PATTERNS: Pattern[] = [
   { re: /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*[<(]/, kind: "function", group: 1 },
   { re: /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/, kind: "class", group: 1 },
-  { re: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/, kind: "function", group: 1 },
+  { re: /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:function\b|[A-Za-z_$][\w$]*\s*=>)/, kind: "function", group: 1 },
   { re: /^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)/, kind: "type", group: 1 },
   { re: /^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*=/, kind: "type", group: 1 },
   { re: /^\s*(?:export\s+)?(?:enum)\s+([A-Za-z_$][\w$]*)/, kind: "type", group: 1 },
@@ -76,7 +76,55 @@ const BRACE_PATTERNS: Pattern[] = [
   { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait)\s+([A-Za-z_]\w*)/, kind: "type", group: 1 },
 ];
 
-const METHOD = /^\s+(?:(?:public|private|protected|static|readonly|override|abstract|async|get|set)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\([^)]*\)\s*(?::\s*[^{]+)?\{\s*$/;
+/** `const name = (async)? (<T>)? ( … ) (: Type)? =>`, with the parameter list found by counting parentheses. */
+const ARROW_HEAD = /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(?:async\s+)?(?:<[^>]*>\s*)?\(/;
+const ARROW_TAIL = /^\s*(?::[^=]+)?=>/;
+
+/** `  modifiers name<T>( … ): Type {`, with the parameter list found by counting parentheses. */
+const METHOD_HEAD = /^\s+(?:(?:public|private|protected|static|readonly|override|abstract|async|get|set)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\(/;
+const METHOD_TAIL = /^\s*(?::\s*[^{]+)?\{\s*$/;
+
+/** Index of the parenthesis closing the one at `open`, or -1. */
+function closeParen(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** Match `head(…)tail` where the parenthesized part may contain nested parentheses. */
+function matchBalanced(code: string, head: RegExp, tail: RegExp): string | undefined {
+  const m = head.exec(code);
+  if (!m?.[1]) return undefined;
+  const close = closeParen(code, m.index + m[0].length - 1);
+  return close >= 0 && tail.test(code.slice(close + 1)) ? m[1] : undefined;
+}
+
+const MAX_SIGNATURE_LINES = 40;
+
+/**
+ * A declaration's signature as one line of code (strings and comments
+ * removed), joined across lines until its parentheses close. Formatters wrap
+ * long parameter lists, and a pattern applied to the first line alone misses
+ * them (#12). `end` is the line where the signature closes.
+ */
+function signature(lines: string[], start: number): { code: string; end: number } {
+  const state = { block: false };
+  let depth = 0;
+  let code = "";
+  for (let i = start; i < lines.length && i < start + MAX_SIGNATURE_LINES; i++) {
+    const part = codeOnly(lines[i]!, state);
+    code = i === start ? part : `${code} ${part.trim()}`;
+    for (const c of part) {
+      if (c === "(") depth++;
+      else if (c === ")") depth--;
+    }
+    if (depth <= 0) return { code, end: i };
+  }
+  return { code: codeOnly(lines[start]!, { block: false }), end: start };
+}
 
 /** Strip string literals and comments so braces inside them do not count. */
 function codeOnly(line: string, state: { block: boolean }): string {
@@ -119,7 +167,7 @@ function codeOnly(line: string, state: { block: boolean }): string {
 }
 
 /** Find the last line of a brace-delimited body starting at `start` (0-based). */
-function braceEnd(lines: string[], start: number): number {
+function braceEnd(lines: string[], start: number, sigEnd = start): number {
   const state = { block: false };
   let depth = 0;
   let opened = false;
@@ -131,12 +179,13 @@ function braceEnd(lines: string[], start: number): number {
         opened = true;
       } else if (c === "}") depth--;
     }
-    if (opened && depth <= 0) return i;
+    if (opened && depth <= 0 && i >= sigEnd) return i;
+    if (i < sigEnd) continue;
     // Declarations without a body: arrow expressions, type aliases, Go/Rust items without braces.
-    if (!opened && i > start + 2) return start;
     if (!opened && /;\s*$/.test(code)) return i;
+    if (!opened && i > sigEnd + 2) return sigEnd;
   }
-  return opened ? lines.length - 1 : start;
+  return opened ? lines.length - 1 : sigEnd;
 }
 
 function indentOf(line: string): number {
@@ -144,10 +193,10 @@ function indentOf(line: string): number {
 }
 
 /** Last line of a Python block: following lines indented deeper than the header. */
-function pythonEnd(lines: string[], start: number): number {
+function pythonEnd(lines: string[], start: number, sigEnd = start): number {
   const base = indentOf(lines[start]!);
-  let end = start;
-  for (let i = start + 1; i < lines.length; i++) {
+  let end = sigEnd;
+  for (let i = sigEnd + 1; i < lines.length; i++) {
     const line = lines[i]!;
     if (line.trim() === "") continue;
     if (indentOf(line) <= base) break;
@@ -181,34 +230,42 @@ function braceExported(line: string, name: string): boolean {
   return false;
 }
 
+function declarationIn(code: string): { name: string; kind: Entity["kind"] } | undefined {
+  const arrow = matchBalanced(code, ARROW_HEAD, ARROW_TAIL);
+  if (arrow && !KEYWORDS.has(arrow)) return { name: arrow, kind: "function" };
+  for (const p of BRACE_PATTERNS) {
+    const name = p.re.exec(code)?.[p.group];
+    if (name && !KEYWORDS.has(name)) return { name, kind: p.kind };
+  }
+  return undefined;
+}
+
 function extractBrace(lines: string[]): Entity[] {
   const out: Entity[] = [];
   let skipUntil = -1;
   for (let i = 0; i < lines.length; i++) {
     if (i <= skipUntil) continue;
     const line = lines[i]!;
-    for (const p of BRACE_PATTERNS) {
-      const m = p.re.exec(line);
-      const name = m?.[p.group];
-      if (!m || !name || KEYWORDS.has(name)) continue;
-      const end = braceEnd(lines, i);
-      const exported = braceExported(line, name);
-      push(out, lines, name, p.kind, i, end, exported);
-      if (p.kind === "class") {
-        for (let j = i + 1; j < end; j++) {
-          const mm = METHOD.exec(lines[j]!);
-          const method = mm?.[1];
-          if (!method || KEYWORDS.has(method) || method === "constructor") continue;
-          const mEnd = braceEnd(lines, j);
-          const isPrivate = /^\s*(private|protected)\b/.test(lines[j]!) || method.startsWith("#");
-          push(out, lines, `${name}.${method}`, "method", j, mEnd, exported && !isPrivate);
-          j = mEnd;
-        }
+    const sig = signature(lines, i);
+    const found = declarationIn(sig.code);
+    if (!found) continue;
+    const { name, kind } = found;
+    const end = braceEnd(lines, i, sig.end);
+    const exported = braceExported(line, name);
+    push(out, lines, name, kind, i, end, exported);
+    if (kind === "class") {
+      for (let j = i + 1; j < end; j++) {
+        const ms = signature(lines, j);
+        const method = matchBalanced(ms.code, METHOD_HEAD, METHOD_TAIL);
+        if (!method || KEYWORDS.has(method) || method === "constructor") continue;
+        const mEnd = braceEnd(lines, j, ms.end);
+        const isPrivate = /^\s*(private|protected)\b/.test(lines[j]!) || method.startsWith("#");
+        push(out, lines, `${name}.${method}`, "method", j, mEnd, exported && !isPrivate);
+        j = mEnd;
       }
-      // Top-level declarations own their body; nested functions are part of it.
-      if (indentOf(line) === 0) skipUntil = end;
-      break;
     }
+    // Top-level declarations own their body; nested functions are part of it.
+    if (indentOf(line) === 0) skipUntil = end;
   }
   return out;
 }
@@ -221,7 +278,8 @@ function extractPython(lines: string[]): Entity[] {
     const m = /^(\s*)(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)/.exec(line);
     if (!m) continue;
     const indent = m[1]!.length;
-    const end = pythonEnd(lines, i);
+    // A wrapped parameter list ends with "):" at the def's own indent (#12).
+    const end = pythonEnd(lines, i, signature(lines, i).end);
     while (classes.length && (i > classes.at(-1)!.end || indent <= classes.at(-1)!.indent)) classes.pop();
     const owner = classes.at(-1);
     const publicName = !m[3]!.startsWith("_");

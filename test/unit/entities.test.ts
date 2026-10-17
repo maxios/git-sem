@@ -155,3 +155,43 @@ describe("export and language awareness (#3)", () => {
     expect(["src/a.ts", "src/testing.ts", "pkg/a.go"].some(isTestPath)).toBe(false);
   });
 });
+
+describe("wrapped signatures (#12)", () => {
+  const span = (path: string, src: string) => extractEntities(path, src).map((e) => `${e.name}:${e.start}-${e.end}`);
+
+  test("an arrow function whose parameters wrap is extracted, with its whole body", () => {
+    const src = "export const pick = (\n  a: number,\n  b: number,\n): number => a + b;\n\nexport const next = 1;\n";
+    expect(span("lib.ts", src)).toEqual(["pick:1-4"]);
+  });
+
+  test("a wrapped arrow function with a block body", () => {
+    const src = "export const load = async (\n  id: string,\n  opts: Options,\n) => {\n  return db.find(id, opts);\n};\n";
+    expect(span("a.ts", src)).toEqual(["load:1-6"]);
+  });
+
+  test("parameters with callback types do not end the parameter list early", () => {
+    expect(span("a.ts", "export const on = (cb: () => void, n = f()) => cb();\n")).toEqual(["on:1-1"]);
+  });
+
+  test("a call assigned to a const is not a function", () => {
+    expect(span("a.ts", "export const handler = createHandler(\n  a,\n  b,\n);\n")).toEqual([]);
+  });
+
+  test("a method whose parameters wrap is extracted", () => {
+    const src = "export class Store {\n  async save(\n    key: string,\n    value: string,\n  ): Promise<void> {\n    await put(key, value);\n  }\n}\n";
+    expect(span("s.ts", src)).toEqual(["Store:1-8", "Store.save:2-7"]);
+  });
+
+  test("a Python def whose parameters wrap keeps its body", () => {
+    const src = "def compute_quota(\n    user,\n    plan,\n):\n    limit = plan.limit\n    return limit - user.used\n\ndef other():\n    pass\n";
+    expect(span("q.py", src)).toEqual(["compute_quota:1-6", "other:8-9"]);
+  });
+
+  test("reformatting a one-line arrow into a wrapped one reads as modified, not removed", () => {
+    const before = "export const pick = (a: number, b: number): number => a + b;\n";
+    const after = "export const pick = (\n  a: number,\n  b: number,\n): number => a + b;\n";
+    expect(diffEntities([{ path: "lib.ts", content: before }], [{ path: "lib.ts", content: after }])).toEqual([
+      { type: "modified", name: "pick", path: "lib.ts", exported: true, tier: 0 },
+    ]);
+  });
+});
