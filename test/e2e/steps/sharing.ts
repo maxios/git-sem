@@ -101,3 +101,23 @@ step("the shared notes on {string} are the same as mine", async (w: World, remot
   const theirs = await spawnText(["git", "rev-parse", SHARED], { cwd: w.remote(remote), env: w.env });
   expect(theirs.stdout.trim()).toBe(await w.revParse(SHARED));
 });
+
+step("the shared notes on {string} hold an authored intent {string}", async (w: World, remote: string, text: string) => {
+  const records = await recordsIn(w, SHARED, w.remote(remote));
+  expect(records.some((r) => r.kind === "intent" && r.source === "authored" && (r.value as { text: string }).text === text)).toBe(true);
+});
+
+const noted = new WeakMap<World, string>();
+
+step("I note where bob's copy of origin's notes points", async (w: World) => {
+  noted.set(w, await w.revParse("refs/notes/sem-remotes/origin"));
+});
+
+step("another process holds the lock on the shared notes", async (w: World) => {
+  const gitDir = (await w.git(["rev-parse", "--absolute-git-dir"])).stdout.trim();
+  await Bun.write(`${gitDir}/refs/notes/sem.lock`, "");
+});
+
+step("bob's copy of origin's notes has not moved", async (w: World) => {
+  expect(await w.revParse("refs/notes/sem-remotes/origin")).toBe(noted.get(w)!);
+});

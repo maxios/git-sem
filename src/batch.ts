@@ -1,5 +1,5 @@
 import type { FileSink } from "bun";
-import { mergeRecords, parseNote, serializeNote, type ArtifactRecord } from "./artifacts.ts";
+import { lineOf, mergeRecords, noteLines, parseNote, serializeLines, type ArtifactRecord } from "./artifacts.ts";
 import type { Git } from "./git.ts";
 import { spawnText } from "./proc.ts";
 import { isShared, type SharePolicy } from "./sharing.ts";
@@ -84,36 +84,52 @@ export class CatFile {
 
 class NotFastForward extends Error {}
 
+/** A change to one note, applied to whatever the note holds when it is written. */
+export interface NoteEdit {
+  add: string[];
+  remove: Set<string>;
+}
+
+function applyEdit(lines: string[], edit: NoteEdit | undefined): string[] {
+  if (!edit) return lines;
+  const out = lines.filter((l) => !edit.remove.has(l));
+  for (const l of edit.add) if (!out.includes(l)) out.push(l);
+  return out;
+}
+
 /**
  * Batched access to one notes ref for bulk work such as backfills.
  *
  *   reads   the notes tree is listed once; note bodies come from one
  *           cat-file process
- *   writes  buffered in memory and committed with one `git fast-import`
- *           per flush instead of two processes per object
+ *   writes  buffered as edits (lines to add, exact lines to remove) and
+ *           committed with one `git fast-import` per flush
  *
- * Writes only ever add records. If someone else moved the notes ref while we
- * worked, the flush reloads, re-merges and tries again.
+ * Edits are applied to the note's raw lines at write time. If another writer
+ * moved the ref meanwhile, the flush reloads and applies the same edits to
+ * the new state, so lines it never touched (a teammate's intent written
+ * concurrently, a record from a newer git-sem) are always kept.
  */
 export class NotesBatch {
   private tip: string | undefined;
   /** object id → path of its note in the notes tree */
   private paths = new Map<string, string>();
-  /** object id → path → blob, for reading */
+  /** object id → blob of its note */
   private blobs = new Map<string, string>();
-  private readonly cache = new Map<string, ArtifactRecord[]>();
-  /** Notes to write at the next flush; an empty list deletes the note. */
-  private readonly pending = new Map<string, ArtifactRecord[]>();
+  private readonly committed = new Map<string, string[]>();
+  private readonly pending = new Map<string, NoteEdit>();
 
   private constructor(
     private readonly git: Git,
     readonly cat: CatFile,
     readonly ref: string,
     private readonly ownsCat: boolean,
+    private readonly at?: string,
   ) {}
 
-  static async open(git: Git, ref: string = NOTES_REF, cat?: CatFile): Promise<NotesBatch> {
-    const batch = new NotesBatch(git, cat ?? new CatFile(git.cwd), ref, !cat);
+  /** Open a ref for reading and writing, or with `at` a fixed commit for reading only. */
+  static async open(git: Git, ref: string = NOTES_REF, cat?: CatFile, at?: string): Promise<NotesBatch> {
+    const batch = new NotesBatch(git, cat ?? new CatFile(git.cwd), ref, !cat, at);
     await batch.load();
     return batch;
   }
@@ -124,10 +140,10 @@ export class NotesBatch {
   }
 
   private async load(): Promise<void> {
-    this.tip = await this.git.resolve(this.ref);
+    this.tip = this.at ?? (await this.git.resolve(this.ref));
     this.paths.clear();
     this.blobs.clear();
-    this.cache.clear();
+    this.committed.clear();
     if (!this.tip) return;
     const out = (await this.git.run(["ls-tree", "-r", "-z", this.tip])).stdout;
     for (const entry of out.split("\0")) {
@@ -146,49 +162,56 @@ export class NotesBatch {
     return this.pending.size;
   }
 
-  async read(object: string): Promise<ArtifactRecord[]> {
-    const pending = this.pending.get(object);
-    if (pending) return pending;
-    const cached = this.cache.get(object);
+  private async committedLines(object: string): Promise<string[]> {
+    const cached = this.committed.get(object);
     if (cached) return cached;
     const blob = this.blobs.get(object);
-    const records = blob ? parseNote((await this.cat.text(blob)) ?? "") : [];
-    this.cache.set(object, records);
-    return records;
+    const lines = blob ? noteLines((await this.cat.text(blob)) ?? "").map((l) => l.line) : [];
+    this.committed.set(object, lines);
+    return lines;
   }
 
+  /** The note's raw lines, including pending edits. */
+  async lines(object: string): Promise<string[]> {
+    return applyEdit(await this.committedLines(object), this.pending.get(object));
+  }
+
+  /** Records as readers see them (one per key). */
+  async read(object: string): Promise<ArtifactRecord[]> {
+    return parseNote((await this.lines(object)).join("\n"));
+  }
+
+  /** Add records whose keys the note does not have yet. Nothing is ever replaced. */
   async add(object: string, records: ArtifactRecord[]): Promise<void> {
     const existing = await this.read(object);
-    const merged = mergeRecords(existing, records);
-    if (merged.length !== existing.length) this.pending.set(object, merged);
+    const fresh = mergeRecords(existing, records).slice(existing.length);
+    if (fresh.length) this.edit(object, { add: fresh.map(lineOf), remove: [] });
   }
 
-  /** Make an object's note exactly these records; an empty list removes the note. For prune only. */
-  async replace(object: string, records: ArtifactRecord[]): Promise<boolean> {
-    const existing = await this.read(object);
-    const same = existing.length === records.length && serializeNote(existing) === serializeNote(records);
-    if (!same) this.pending.set(object, records);
-    return !same;
+  /** Queue lines to add and exact lines to remove. For prune and reset. */
+  edit(object: string, change: { add: string[]; remove: string[] }): void {
+    if (change.add.length === 0 && change.remove.length === 0) return;
+    const e = this.pending.get(object) ?? { add: [], remove: new Set<string>() };
+    for (const l of change.remove) e.remove.add(l);
+    e.add = e.add.filter((l) => !e.remove.has(l));
+    for (const l of change.add) if (!e.add.includes(l)) e.add.push(l);
+    this.pending.set(object, e);
   }
 
   async flush(): Promise<void> {
     if (this.pending.size === 0) return;
+    if (this.at) throw new Error(`notes at ${this.at} are read-only`);
     for (let attempt = 1; ; attempt++) {
       try {
         await this.write();
         break;
       } catch (e) {
         if (!(e instanceof NotFastForward) || attempt >= 3) throw e;
-        await this.rebase();
+        await this.load(); // edits are re-applied to the new state
       }
     }
-    for (const [object, records] of this.pending) {
-      this.cache.set(object, records);
-      this.blobs.delete(object);
-      if (records.length) this.paths.set(object, object);
-      else this.paths.delete(object);
-    }
     this.pending.clear();
+    await this.load();
   }
 
   async close(): Promise<void> {
@@ -196,17 +219,6 @@ export class NotesBatch {
       await this.flush();
     } finally {
       if (this.ownsCat) await this.cat.close();
-    }
-  }
-
-  /** Reload the notes ref and merge our pending records onto what is there now. */
-  private async rebase(): Promise<void> {
-    const mine = [...this.pending];
-    this.pending.clear();
-    await this.load();
-    for (const [object, records] of mine) {
-      if (records.length) await this.add(object, records);
-      else this.pending.set(object, records);
     }
   }
 
@@ -219,13 +231,19 @@ export class NotesBatch {
       `data ${encoder.encode(message).length}\n${message}\n`,
     ];
     if (this.tip) chunks.push(`from ${this.tip}\n`);
-    for (const [object, records] of this.pending) {
+    let changes = 0;
+    for (const [object, edit] of this.pending) {
+      const before = await this.committedLines(object);
+      const after = applyEdit(before, edit);
+      if (serializeLines(before) === serializeLines(after) && (before.length > 0) === this.paths.has(object)) continue;
+      changes++;
       const old = this.paths.get(object);
-      if (old && (old !== object || records.length === 0)) chunks.push(`D ${old}\n`);
-      if (records.length === 0) continue;
-      const body = serializeNote(records);
+      if (old && (old !== object || after.length === 0)) chunks.push(`D ${old}\n`);
+      if (after.length === 0) continue;
+      const body = serializeLines(after);
       chunks.push(`M 100644 inline ${object}\ndata ${encoder.encode(body).length}\n${body}\n`);
     }
+    if (changes === 0) return;
 
     const r = await spawnText(["git", "fast-import", "--quiet", "--date-format=raw"], {
       cwd: this.git.cwd,
@@ -235,7 +253,6 @@ export class NotesBatch {
       if (/not updating|does not contain|fast.forward/i.test(r.stderr)) throw new NotFastForward(r.stderr);
       throw new Error(`git fast-import failed: ${r.stderr.trim()}`);
     }
-    this.tip = await this.git.resolve(this.ref);
   }
 }
 

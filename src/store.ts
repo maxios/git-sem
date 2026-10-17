@@ -1,4 +1,4 @@
-import { mergeRecords, parseNote, serializeNote, type ArtifactRecord } from "./artifacts.ts";
+import { lineOf, mergeRecords, noteLines, parseNote, serializeLines, type ArtifactRecord } from "./artifacts.ts";
 import type { Git } from "./git.ts";
 import { isShared, type SharePolicy } from "./sharing.ts";
 
@@ -65,10 +65,12 @@ export class ArtifactStore {
   }
 
   private async append(ref: string, object: string, records: ArtifactRecord[]): Promise<void> {
-    const merged = mergeRecords(parseNote(await this.readRef(ref, object)), records);
+    // Keep every existing line as stored; see noteLines for why.
+    const existing = noteLines(await this.readRef(ref, object)).map((l) => l.line);
+    const body = serializeLines([...existing, ...records.map(lineOf)]);
     // Store the exact bytes as a blob, then attach it with -C so git does not
     // reformat the note body.
-    const blob = await this.git.out(["hash-object", "-w", "--stdin"], { input: serializeNote(merged) });
+    const blob = await this.git.out(["hash-object", "-w", "--stdin"], { input: body });
     for (let attempt = 0; ; attempt++) {
       const r = await this.git.run(["notes", "--ref", ref, "add", "-f", "-C", blob, object], { allowFail: attempt < 2 });
       if (r.code === 0) return;

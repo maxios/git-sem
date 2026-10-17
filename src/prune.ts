@@ -1,4 +1,4 @@
-import { mergeRecords, type ArtifactRecord } from "./artifacts.ts";
+import { noteLines, type ArtifactRecord } from "./artifacts.ts";
 import { CatFile, NotesBatch } from "./batch.ts";
 import type { Git } from "./git.ts";
 import { place, type SharePolicy } from "./sharing.ts";
@@ -44,23 +44,56 @@ export async function applyPolicy(
   const shared = await NotesBatch.open(git, NOTES_REF, cat);
   const local = await NotesBatch.open(git, LOCAL_NOTES_REF, cat);
   try {
+    const edits: Array<{ object: string; shared: { add: string[]; remove: string[] }; local: { add: string[]; remove: string[] } }> = [];
     const objects = new Set(shared.objects());
     if (opts.scope === "all") for (const o of local.objects()) objects.add(o);
 
     for (const object of objects) {
-      const inShared = await shared.read(object);
-      const inLocal = await local.read(object);
-      const placement = place(mergeRecords(inShared, inLocal), policy);
-      const sharedKeys = new Set(inShared.map((r) => JSON.stringify(r)));
-      for (const r of placement.local) if (sharedKeys.has(JSON.stringify(r))) count(stats.moved, r);
+      const sharedLines = await shared.lines(object);
+      const localLines = await local.lines(object);
+      // Judge every distinct record line once, whichever ref holds it. Lines
+      // git-sem does not understand are never moved or removed.
+      const byLine = new Map<string, ArtifactRecord>();
+      for (const { line, record } of noteLines([...sharedLines, ...localLines].join("\n"))) {
+        if (record) byLine.set(line, record);
+      }
+      const lineFor = new Map<ArtifactRecord, string>([...byLine].map(([l, r]) => [r, l]));
+      const placement = place([...byLine.values()], policy);
+
+      const inShared = new Set(sharedLines);
+      const inLocal = new Set(localLines);
+      const toShared = placement.shared.map((r) => lineFor.get(r)!);
+      const toLocal = placement.local.map((r) => lineFor.get(r)!);
+      const dropped = placement.dropped.map((r) => lineFor.get(r)!);
+
+      for (const r of placement.local) if (inShared.has(lineFor.get(r)!)) count(stats.moved, r);
       for (const r of placement.dropped) count(stats.dropped, r);
 
-      const changedShared = await shared.replace(object, placement.shared);
-      const changedLocal = await local.replace(object, placement.local);
-      if (changedShared || changedLocal) stats.objects++;
+      const sharedEdit = {
+        add: toShared.filter((l) => !inShared.has(l)),
+        remove: [...toLocal, ...dropped].filter((l) => inShared.has(l)),
+      };
+      const localEdit = {
+        add: toLocal.filter((l) => !inLocal.has(l)),
+        remove: [...toShared, ...dropped].filter((l) => inLocal.has(l)),
+      };
+      if (sharedEdit.add.length + sharedEdit.remove.length + localEdit.add.length + localEdit.remove.length) stats.objects++;
+      edits.push({ object, shared: sharedEdit, local: localEdit });
     }
     if (!opts.dryRun) {
-      await local.flush(); // local first: a moved record is never absent from both
+      // Two phases, so a record that moves between refs is never absent from
+      // both, whichever direction it moves and wherever a crash happens.
+      for (const e of edits) {
+        shared.edit(e.object, { add: e.shared.add, remove: [] });
+        local.edit(e.object, { add: e.local.add, remove: [] });
+      }
+      await local.flush();
+      await shared.flush();
+      for (const e of edits) {
+        shared.edit(e.object, { add: [], remove: e.shared.remove });
+        local.edit(e.object, { add: [], remove: e.local.remove });
+      }
+      await local.flush();
       await shared.flush();
     }
   } finally {

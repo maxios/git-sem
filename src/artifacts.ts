@@ -113,6 +113,49 @@ export function parseNote(text: string): ArtifactRecord[] {
   return [...byKey.values()];
 }
 
+/** One line of a note, with its record when git-sem understands it. */
+export interface NoteLine {
+  line: string;
+  record?: ArtifactRecord;
+}
+
+/**
+ * Every distinct line of a note, exactly as stored. Writers must work from
+ * these, not from parseNote: parseNote collapses records that share a key
+ * (two teammates' intents from the same model) and skips lines it does not
+ * understand (records from a newer git-sem), and rewriting a note from that
+ * view would lose them.
+ */
+export function noteLines(text: string): NoteLine[] {
+  const out: NoteLine[] = [];
+  const seen = new Set<string>();
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    let record: ArtifactRecord | undefined;
+    if (line.startsWith("{")) {
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (isRecord(parsed)) record = parsed;
+      } catch {
+        // kept as an opaque line
+      }
+    }
+    out.push({ line, record });
+  }
+  return out;
+}
+
+export function lineOf(r: ArtifactRecord): string {
+  return JSON.stringify(r);
+}
+
+/** Sorted, deduplicated lines: the stored form of a note. */
+export function serializeLines(lines: Iterable<string>): string {
+  return `${[...new Set(lines)].sort().join("\n")}\n`;
+}
+
 /** Serialize records as sorted JSON Lines, compatible with git's cat_sort_uniq merge. */
 export function serializeNote(records: ArtifactRecord[]): string {
   return `${records.map((r) => JSON.stringify(r)).sort().join("\n")}\n`;

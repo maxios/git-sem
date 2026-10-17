@@ -126,3 +126,55 @@ Feature: Share only what cannot be recomputed
     When I try to run "git sem push origin --force-with-lease"
     Then it fails with a message containing "changed since your last fetch"
     And the shared notes on "origin" hold an intent from model "m2"
+
+  Scenario: Taking a squashed history keeps your unpushed intents
+    Given a shared remote "origin"
+    And "alice" has cloned "origin" with the semantic layer initialized
+    And "bob" has cloned "origin" with the semantic layer initialized
+    And background indexing is disabled for all teammates
+    And I am "alice"
+    And the semantic engine is the test engine with model "m1"
+    And I commit a change to "a.ts" with message "one"
+    And I run "git sem index"
+    And I run "git push --quiet origin HEAD:main"
+    And I run "git sem push origin"
+    And I am "bob"
+    And I run "git pull --quiet origin main"
+    And I run "git sem fetch origin"
+    And I run "git sem intent HEAD --set 'Bob explains why, not pushed yet'"
+    And I am "alice"
+    And I run "git sem prune --squash"
+    And I run "git sem push origin --force-with-lease"
+    When I am "bob"
+    And I run "git sem fetch origin --reset"
+    Then HEAD shows the authored intent "Bob explains why, not pushed yet"
+    And the output contains "Kept 1 record"
+    When I run "git sem push origin"
+    Then the shared notes on "origin" hold an authored intent "Bob explains why, not pushed yet"
+
+  Scenario: A failed fetch does not vouch for notes it did not take in
+    Given a shared remote "origin"
+    And "alice" has cloned "origin" with the semantic layer initialized
+    And "bob" has cloned "origin" with the semantic layer initialized
+    And background indexing is disabled for all teammates
+    And I am "alice"
+    And the semantic engine is the test engine with model "m1"
+    And I commit a change to "a.ts" with message "one"
+    And I run "git sem index"
+    And I run "git push --quiet origin HEAD:main"
+    And I run "git sem push origin"
+    And I am "bob"
+    And the semantic engine is the test engine with model "m2"
+    And I run "git pull --quiet origin main"
+    And I run "git sem index --rev HEAD"
+    And I run "git sem fetch origin"
+    And I note where bob's copy of origin's notes points
+    And I am "alice"
+    And I commit a change to "b.ts" with message "two"
+    And I run "git sem index"
+    And I run "git sem push origin"
+    And I am "bob"
+    And another process holds the lock on the shared notes
+    When I try to run "git sem fetch origin"
+    Then it fails with a message containing "lock"
+    And bob's copy of origin's notes has not moved
