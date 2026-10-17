@@ -54,12 +54,33 @@ Files:
 ${files}
 
 Diff:
-${input.diff.slice(0, 12_000)}`;
+${input.diff.slice(0, 6_000)}
+
+Respond with the JSON object only.`;
+
+// A JSON schema in `format` constrains decoding, so even a small model can only
+// answer in this shape. Ollama's default context is small enough that a long
+// diff pushes the instruction out, so ask for a larger window explicitly.
+const schema = {
+  type: "object",
+  properties: {
+    text: { type: "string" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+    questions: { type: "array", items: { type: "string" } },
+  },
+  required: ["text", "confidence"],
+};
 
 const response = await fetch(`${host}/api/generate`, {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify({ model: input.model, prompt: instruction, stream: false, format: "json" }),
+  body: JSON.stringify({
+    model: input.model,
+    prompt: instruction,
+    stream: false,
+    format: schema,
+    options: { num_ctx: 8192, temperature: 0.2 },
+  }),
 });
 if (!response.ok) {
   console.error(`ollama returned ${response.status}: ${await response.text()}`);
