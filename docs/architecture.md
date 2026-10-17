@@ -184,6 +184,23 @@ over both refs on demand and squashes the local ref's history;
 `--squash` also squashes the shared ref, which only
 `push --force-with-lease` (guarded by the last fetched value) can share.
 
+### Writing notes safely
+
+Every writer changes a note by an edit: lines to add and exact lines to
+remove, applied to the note's raw lines when it is written. Nobody rewrites
+a note from parsed records, because parsing collapses records that share a
+key (two teammates' intents from the same model) and skips lines from a
+newer git-sem. When a flush loses a race with another writer, the same
+edits are re-applied to the new state, so a line written concurrently
+survives. Prune applies all additions before any removal, so a record that
+moves between refs is never absent from both.
+
+Fetches land in `refs/notes/sem-incoming/<remote>`; the tracking ref
+`refs/notes/sem-remotes/<remote>` moves only after the merge or reset
+succeeds, so `push --force-with-lease` can never approve notes that were
+not taken in. `fetch --reset` carries over any line of yours that cannot be
+recomputed and that the remote lacks.
+
 `git sem push` fetches and merges before pushing and retries if it races
 another pusher.
 
