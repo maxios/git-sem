@@ -10,8 +10,11 @@ import type { Git } from "./git.ts";
 import type { Repo } from "./repo.ts";
 import { NOTES_REF } from "./store.ts";
 
-/** Bumped whenever documents or embeddings change shape; an older index rebuilds itself. 2: stemming (#6). */
-const SCHEMA = "2";
+/**
+ * Bumped whenever documents or embeddings change shape; an older index
+ * rebuilds itself. 2: stemming (#6). 3: author's words keep full weight (#13).
+ */
+const SCHEMA = "3";
 
 export interface Doc {
   kind: "commit" | "entity";
@@ -19,10 +22,25 @@ export interface Doc {
   path: string | null;
   commit: string;
   text: string;
+  /** Precomputed vector; otherwise the text is embedded. */
+  vec?: Float32Array;
 }
 
 export interface Hit extends Doc {
   score: number;
+}
+
+/** Scores this close count as a tie. */
+export const TIE = 0.01;
+
+/**
+ * Higher score first. On a tie the more specific answer wins: an entity
+ * before a commit, e.g. a function before the commit that added it.
+ */
+export function byRelevance(a: Pick<Hit, "score" | "kind">, b: Pick<Hit, "score" | "kind">): number {
+  if (Math.abs(a.score - b.score) >= TIE) return b.score - a.score;
+  if (a.kind !== b.kind) return a.kind === "entity" ? -1 : 1;
+  return b.score - a.score;
 }
 
 function toBlob(vec: Float32Array): Uint8Array {
@@ -114,10 +132,48 @@ export class SearchIndex {
       }
     }
     return [...best.values()]
-      .sort((a, b) => b.score - a.score)
+      .sort(byRelevance)
       .slice(0, limit)
       .map(({ rowid: _rowid, ...hit }) => hit);
   }
+}
+
+/** The message of a raw commit object: everything after the header. */
+export function messageOf(commitObject: string): string {
+  const i = commitObject.indexOf("\n\n");
+  return i < 0 ? "" : commitObject.slice(i + 2).trim();
+}
+
+/**
+ * How much an inferred intent counts next to the author's own words. A
+ * model's paraphrase often drops the one word a person would search for, so
+ * it may add words but must not outweigh the message (#13). Tuned on
+ * known-answer queries: at 0.25 a paraphrase cannot push the right commit
+ * down, and a query using only the intent's words still finds the commit.
+ */
+export const INFERRED_INTENT_WEIGHT = 0.25;
+
+function normalize(v: Float32Array): Float32Array {
+  let n = 0;
+  for (const x of v) n += x * x;
+  n = Math.sqrt(n);
+  if (n > 0) for (let i = 0; i < v.length; i++) v[i]! /= n;
+  return v;
+}
+
+/**
+ * A commit's search vector: the author's message at full weight, plus the
+ * intent. An authored intent was chosen by a person, so it counts as much
+ * as the message; an inferred one counts INFERRED_INTENT_WEIGHT.
+ */
+export function commitVector(message: string, intent: string, source?: string): Float32Array {
+  const m = embed(message);
+  if (!intent) return m;
+  const weight = source === "authored" ? 1 : INFERRED_INTENT_WEIGHT;
+  const i = embed(intent);
+  const v = new Float32Array(m.length);
+  for (let k = 0; k < v.length; k++) v[k] = m[k]! + weight * i[k]!;
+  return normalize(v);
 }
 
 async function build(db: Database, git: Git, tip: string): Promise<void> {
@@ -139,8 +195,17 @@ async function build(db: Database, git: Git, tip: string): Promise<void> {
         const changes = records.find((r) => keyOf(r) === CHANGES_KEY)?.value as ChangesValue | undefined;
         if (!changes) continue; // not a commit note (blob facts, etc.)
 
-        const intent = (resolveIntent(records)?.value as { text?: string } | undefined)?.text ?? "";
-        docs.push({ kind: "commit", name: null, path: null, commit: object, text: `${intent}\n${changes.subject}` });
+        const resolved = resolveIntent(records);
+        const intent = (resolved?.value as { text?: string } | undefined)?.text ?? "";
+        const message = messageOf((await cat.text(object)) ?? "") || changes.subject;
+        docs.push({
+          kind: "commit",
+          name: null,
+          path: null,
+          commit: object,
+          text: `${message}\n${intent}`,
+          vec: commitVector(message, intent, resolved?.source),
+        });
 
         for (const e of eventsIn(records, { allowLegacy: true }) ?? []) {
           if (e.type === "removed") continue;
@@ -167,7 +232,7 @@ async function build(db: Database, git: Git, tip: string): Promise<void> {
   }
 
   db.transaction(() => {
-    for (const d of docs) insert.run(d.kind, d.name, d.path, d.commit, d.text, toBlob(embed(d.text)));
+    for (const d of docs) insert.run(d.kind, d.name, d.path, d.commit, d.text, toBlob(d.vec ?? embed(d.text)));
     db.run("INSERT INTO meta (key, value) VALUES ('schema', ?), ('notes', ?)", [SCHEMA, tip]);
   })();
 }

@@ -40,3 +40,14 @@ Feature: Semantic search across history and branches
     And I run "git sem index"
     When I run "git sem search 'undo history'"
     Then the top search result is the commit "editor: a source that journals and undoes"
+
+  Scenario: A model's paraphrase does not push the right commit down
+    Given the semantic engine paraphrases commits as:
+      | subject starts with | intent                                                 |
+      | editor              | Added panels beside the canvas.                        |
+      | billing             | Invoices keep a history of past payments and refunds. |
+    And I commit a change to "src/editor.ts" with message "editor: a source that journals and undoes"
+    And I commit a change to "src/billing.ts" with message "billing: monthly invoices with a history of past payments and refunds"
+    And I run "git sem index"
+    When I run "git sem search 'undo history'"
+    Then the top search result is the commit "editor: a source that journals and undoes"

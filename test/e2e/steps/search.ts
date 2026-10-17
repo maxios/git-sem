@@ -86,3 +86,19 @@ step("the search results include {string} labeled {string}", async (w: World, na
   const line = (w.last?.stdout ?? "").split("\n").find((l) => l.includes(` ${name} `));
   expect(line).toContain(labelText);
 });
+
+step("the semantic engine paraphrases commits as:", async (w: World, rows: string[][]) => {
+  const map = Object.fromEntries(rows.slice(1).map(([prefix, intent]) => [prefix!, intent!]));
+  const stub = join(w.root, "paraphrase-engine.ts");
+  await writeFile(
+    stub,
+    `const map = ${JSON.stringify(map)};
+const input = await Bun.stdin.json();
+const key = Object.keys(map).find((k) => (input.subject ?? "").startsWith(k));
+console.log(JSON.stringify({ text: key ? map[key] : "A change.", confidence: 0.9 }));
+`,
+  );
+  await w.git(["config", "sem.engine", "command"]);
+  await w.git(["config", "sem.command", `"${process.execPath}" "${stub}"`]);
+  await w.git(["config", "sem.model", "paraphraser"]);
+});
