@@ -1,4 +1,6 @@
-import { lineOf, mergeRecords, noteLines, parseNote, serializeLines, type ArtifactRecord } from "./artifacts.ts";
+import { lineOf, mergeRecords, parseNote, type ArtifactRecord } from "./artifacts.ts";
+import { NotesBatch } from "./batch.ts";
+import { ALL_NOTES_REFS, LOCAL_NOTES_REF, NOTES_REF, notesArgs } from "./refs.ts";
 import type { Git } from "./git.ts";
 import { isShared, type SharePolicy } from "./sharing.ts";
 
@@ -12,14 +14,7 @@ import { isShared, type SharePolicy } from "./sharing.ts";
  * per line, so git's `cat_sort_uniq` strategy unions two teammates' notes
  * without conflicts. Readers always see both refs together.
  */
-export const NOTES_REF = "refs/notes/sem";
-export const LOCAL_NOTES_REF = "refs/notes/sem-local";
-export const ALL_NOTES_REFS = [NOTES_REF, LOCAL_NOTES_REF] as const;
-
-/** `git log` arguments that attach both refs' notes to %N. */
-export function notesArgs(): string[] {
-  return ["--no-notes", ...ALL_NOTES_REFS.map((ref) => `--notes=${ref}`)];
-}
+export { ALL_NOTES_REFS, LOCAL_NOTES_REF, NOTES_REF, notesArgs };
 
 export async function readPolicy(git: Git): Promise<SharePolicy> {
   const r = await git.run(["config", "--get", "sem.share"], { allowFail: true });
@@ -64,17 +59,14 @@ export class ArtifactStore {
     }
   }
 
+  /**
+   * Add lines through NotesBatch, whose write is a compare-and-swap edit on
+   * the note's current lines: a concurrent writer's records are never
+   * overwritten (a plain `git notes add -f` would replace them).
+   */
   private async append(ref: string, object: string, records: ArtifactRecord[]): Promise<void> {
-    // Keep every existing line as stored; see noteLines for why.
-    const existing = noteLines(await this.readRef(ref, object)).map((l) => l.line);
-    const body = serializeLines([...existing, ...records.map(lineOf)]);
-    // Store the exact bytes as a blob, then attach it with -C so git does not
-    // reformat the note body.
-    const blob = await this.git.out(["hash-object", "-w", "--stdin"], { input: body });
-    for (let attempt = 0; ; attempt++) {
-      const r = await this.git.run(["notes", "--ref", ref, "add", "-f", "-C", blob, object], { allowFail: attempt < 2 });
-      if (r.code === 0) return;
-      await Bun.sleep(25 * (attempt + 1)); // another writer held the notes ref lock
-    }
+    const batch = await NotesBatch.open(this.git, ref);
+    batch.edit(object, { add: records.map(lineOf), remove: [] });
+    await batch.close();
   }
 }

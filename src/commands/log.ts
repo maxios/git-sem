@@ -3,7 +3,7 @@ import { keyOf, parseNote, resolveIntent, type ChangeEntry, type ChangesValue } 
 import { firstLine } from "../draft.ts";
 import { CHANGES_KEY } from "../indexer.ts";
 import { openRepo, type Repo } from "../repo.ts";
-import { notesArgs } from "../store.ts";
+import { notesArgs } from "../refs.ts";
 import { currentIdentity } from "./context.ts";
 import { intentBadge, intentView, short, type IntentView } from "./format.ts";
 

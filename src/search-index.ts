@@ -8,7 +8,7 @@ import { bodyOf, extractEntities } from "./entities.ts";
 import { CHANGES_KEY, eventsIn } from "./entity-git.ts";
 import type { Git } from "./git.ts";
 import type { Repo } from "./repo.ts";
-import { ALL_NOTES_REFS } from "./store.ts";
+import { ALL_NOTES_REFS } from "./refs.ts";
 
 /**
  * Bumped whenever documents or embeddings change shape; an older index

@@ -77,15 +77,21 @@ async function fetchNotes(git: Git, remote: string, opts: { reset?: boolean } = 
     await git.run(["update-ref", NOTES_REF, theirs]);
     result = "created";
   } else if (opts.reset) {
+    // Build the carried-over lines on top of the remote's notes first (in the
+    // staging ref), then move the shared ref once, guarded by its old value.
+    // Until that single update, nothing of yours has left the shared ref.
     const carry = await unpushedJudgment(git, local, theirs);
-    await git.run(["update-ref", NOTES_REF, theirs, local]);
     if (carry.size) {
-      const batch = await NotesBatch.open(git, NOTES_REF);
+      const staged = await NotesBatch.open(git, incoming);
       for (const [object, lines] of carry) {
-        batch.edit(object, { add: lines, remove: [] });
+        staged.edit(object, { add: lines, remove: [] });
         kept += lines.length;
       }
-      await batch.close();
+      await staged.close();
+    }
+    const swap = await git.run(["update-ref", NOTES_REF, incoming, local], { allowFail: true });
+    if (swap.code !== 0) {
+      throw new UserError("your shared notes changed during the reset; nothing was replaced. Run `git sem fetch --reset` again.");
     }
     result = "reset";
   } else {

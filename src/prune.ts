@@ -2,7 +2,7 @@ import { noteLines, type ArtifactRecord } from "./artifacts.ts";
 import { CatFile, NotesBatch } from "./batch.ts";
 import type { Git } from "./git.ts";
 import { place, type SharePolicy } from "./sharing.ts";
-import { LOCAL_NOTES_REF, NOTES_REF } from "./store.ts";
+import { LOCAL_NOTES_REF, NOTES_REF } from "./refs.ts";
 
 export interface PruneStats {
   /** Recomputable records moved from the shared ref to the local one. */

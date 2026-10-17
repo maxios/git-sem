@@ -3,7 +3,7 @@ import type { CatFile } from "./batch.ts";
 import { commitChanges } from "./changes.ts";
 import { diffEntities, extractEntities, languageOf, type Entity, type EntityEvent, type FileVersion } from "./entities.ts";
 import type { Git } from "./git.ts";
-import { notesArgs } from "./store.ts";
+import { notesArgs } from "./refs.ts";
 import { ENTITIES_VERSION } from "./versions.ts";
 
 export { ENTITIES_VERSION };

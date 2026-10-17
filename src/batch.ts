@@ -3,7 +3,7 @@ import { lineOf, mergeRecords, noteLines, parseNote, serializeLines, type Artifa
 import type { Git } from "./git.ts";
 import { spawnText } from "./proc.ts";
 import { isShared, type SharePolicy } from "./sharing.ts";
-import { LOCAL_NOTES_REF, NOTES_REF } from "./store.ts";
+import { LOCAL_NOTES_REF, NOTES_REF } from "./refs.ts";
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -83,6 +83,9 @@ export class CatFile {
 }
 
 class NotFastForward extends Error {}
+
+/** Lost races before a flush gives up; each retry re-applies the edits to the new state. */
+const MAX_WRITE_ATTEMPTS = 12;
 
 /** A change to one note, applied to whatever the note holds when it is written. */
 export interface NoteEdit {
@@ -206,7 +209,9 @@ export class NotesBatch {
         await this.write();
         break;
       } catch (e) {
-        if (!(e instanceof NotFastForward) || attempt >= 3) throw e;
+        if (!(e instanceof NotFastForward) || attempt >= MAX_WRITE_ATTEMPTS) throw e;
+        // Back off with jitter so contending writers stop colliding.
+        await Bun.sleep(Math.min(2_000, 20 * 2 ** attempt) * (0.5 + Math.random()));
         await this.load(); // edits are re-applied to the new state
       }
     }
@@ -250,7 +255,10 @@ export class NotesBatch {
       input: chunks.join(""),
     });
     if (r.code !== 0) {
-      if (/not updating|does not contain|fast.forward/i.test(r.stderr)) throw new NotFastForward(r.stderr);
+      // Another writer moved the ref, or holds its lock right now: retry.
+      if (/not updating|does not contain|fast.forward|cannot lock|unable to create .*\.lock/i.test(r.stderr)) {
+        throw new NotFastForward(r.stderr);
+      }
       throw new Error(`git fast-import failed: ${r.stderr.trim()}`);
     }
   }

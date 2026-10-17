@@ -114,3 +114,32 @@ describe("prune never loses judgment", () => {
     expect(shared).toHaveLength(3);
   });
 });
+
+describe("concurrent writers (second review)", () => {
+  test("bulk and single-record writers on one note never overwrite each other", async () => {
+    const N = 25;
+    const agents = Array.from({ length: N }, (_, i) => rec({ engine: "agent", model: `bot-${i}`, prompt: "agent/v1" }));
+    const people = Array.from({ length: N }, (_, i) =>
+      rec({ source: "authored", engine: "human", model: "none", prompt: "none", author: `p${i}@x`, createdAt: `2026-10-0${1 + (i % 9)}T00:00:${String(i).padStart(2, "0")}.000Z` }),
+    );
+    // Separate processes, like the background indexer and a person at the terminal.
+    const script = (kind: "batch" | "store", records: ArtifactRecord[]) => `
+      const { Git } = await import(${JSON.stringify(join(import.meta.dir, "../../src/git.ts"))});
+      const { NotesBatch } = await import(${JSON.stringify(join(import.meta.dir, "../../src/batch.ts"))});
+      const { ArtifactStore } = await import(${JSON.stringify(join(import.meta.dir, "../../src/store.ts"))});
+      const git = new Git(${JSON.stringify(dir)});
+      for (const r of ${JSON.stringify(records)}) {
+        if (${JSON.stringify(kind)} === "batch") { const b = await NotesBatch.open(git); await b.add(r.object, [r]); await b.close(); }
+        else await new ArtifactStore(git, { shareDerived: false }).add(r.object, [r]);
+      }`;
+    const run = (code: string) => Bun.spawn([process.execPath, "-e", code], { cwd: dir, env: { ...process.env }, stdout: "ignore", stderr: "pipe" });
+    const procs = [run(script("batch", agents)), run(script("store", people))];
+    const codes = await Promise.all(procs.map((p) => p.exited));
+    const errors = await Promise.all(procs.map((p) => new Response(p.stderr).text()));
+    expect({ codes, errors: errors.filter(Boolean) }).toEqual({ codes: [0, 0], errors: [] });
+
+    const lines = await linesIn(NOTES_REF);
+    const missing = [...agents, ...people].filter((r) => !lines.includes(lineOf(r)));
+    expect(missing.map((r) => r.model === "none" ? r.author : r.model)).toEqual([]);
+  }, 60_000);
+});

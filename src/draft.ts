@@ -3,7 +3,7 @@ import { stagedChanges, stagedDiff } from "./changes.ts";
 import type { Engine, IntentProposal } from "./engines/index.ts";
 import { identityOf } from "./engines/index.ts";
 import type { Git } from "./git.ts";
-import { notesArgs } from "./store.ts";
+import { notesArgs } from "./refs.ts";
 
 /** A past commit that touched the same files, with its recorded meaning. */
 export interface HistoryEntry {
