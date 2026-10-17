@@ -2,7 +2,8 @@ import type { FileSink } from "bun";
 import { mergeRecords, parseNote, serializeNote, type ArtifactRecord } from "./artifacts.ts";
 import type { Git } from "./git.ts";
 import { spawnText } from "./proc.ts";
-import { NOTES_REF } from "./store.ts";
+import { isShared, type SharePolicy } from "./sharing.ts";
+import { LOCAL_NOTES_REF, NOTES_REF } from "./store.ts";
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -84,7 +85,7 @@ export class CatFile {
 class NotFastForward extends Error {}
 
 /**
- * Batched access to refs/notes/sem for bulk work such as backfills.
+ * Batched access to one notes ref for bulk work such as backfills.
  *
  *   reads   the notes tree is listed once; note bodies come from one
  *           cat-file process
@@ -101,21 +102,29 @@ export class NotesBatch {
   /** object id → path → blob, for reading */
   private blobs = new Map<string, string>();
   private readonly cache = new Map<string, ArtifactRecord[]>();
+  /** Notes to write at the next flush; an empty list deletes the note. */
   private readonly pending = new Map<string, ArtifactRecord[]>();
 
   private constructor(
     private readonly git: Git,
     readonly cat: CatFile,
+    readonly ref: string,
+    private readonly ownsCat: boolean,
   ) {}
 
-  static async open(git: Git): Promise<NotesBatch> {
-    const batch = new NotesBatch(git, new CatFile(git.cwd));
+  static async open(git: Git, ref: string = NOTES_REF, cat?: CatFile): Promise<NotesBatch> {
+    const batch = new NotesBatch(git, cat ?? new CatFile(git.cwd), ref, !cat);
     await batch.load();
     return batch;
   }
 
+  /** Every object that has a note in this ref. */
+  objects(): string[] {
+    return [...new Set([...this.paths.keys(), ...this.pending.keys()])];
+  }
+
   private async load(): Promise<void> {
-    this.tip = await this.git.resolve(NOTES_REF);
+    this.tip = await this.git.resolve(this.ref);
     this.paths.clear();
     this.blobs.clear();
     this.cache.clear();
@@ -154,6 +163,14 @@ export class NotesBatch {
     if (merged.length !== existing.length) this.pending.set(object, merged);
   }
 
+  /** Make an object's note exactly these records; an empty list removes the note. For prune only. */
+  async replace(object: string, records: ArtifactRecord[]): Promise<boolean> {
+    const existing = await this.read(object);
+    const same = existing.length === records.length && serializeNote(existing) === serializeNote(records);
+    if (!same) this.pending.set(object, records);
+    return !same;
+  }
+
   async flush(): Promise<void> {
     if (this.pending.size === 0) return;
     for (let attempt = 1; ; attempt++) {
@@ -167,8 +184,9 @@ export class NotesBatch {
     }
     for (const [object, records] of this.pending) {
       this.cache.set(object, records);
-      this.paths.set(object, object);
       this.blobs.delete(object);
+      if (records.length) this.paths.set(object, object);
+      else this.paths.delete(object);
     }
     this.pending.clear();
   }
@@ -177,7 +195,7 @@ export class NotesBatch {
     try {
       await this.flush();
     } finally {
-      await this.cat.close();
+      if (this.ownsCat) await this.cat.close();
     }
   }
 
@@ -186,21 +204,25 @@ export class NotesBatch {
     const mine = [...this.pending];
     this.pending.clear();
     await this.load();
-    for (const [object, records] of mine) await this.add(object, records);
+    for (const [object, records] of mine) {
+      if (records.length) await this.add(object, records);
+      else this.pending.set(object, records);
+    }
   }
 
   private async write(): Promise<void> {
     const ident = await this.git.out(["var", "GIT_COMMITTER_IDENT"]);
     const message = `git-sem: ${this.pending.size} note${this.pending.size === 1 ? "" : "s"}`;
     const chunks: string[] = [
-      `commit ${NOTES_REF}\n`,
+      `commit ${this.ref}\n`,
       `committer ${ident}\n`,
       `data ${encoder.encode(message).length}\n${message}\n`,
     ];
     if (this.tip) chunks.push(`from ${this.tip}\n`);
     for (const [object, records] of this.pending) {
       const old = this.paths.get(object);
-      if (old && old !== object) chunks.push(`D ${old}\n`);
+      if (old && (old !== object || records.length === 0)) chunks.push(`D ${old}\n`);
+      if (records.length === 0) continue;
       const body = serializeNote(records);
       chunks.push(`M 100644 inline ${object}\ndata ${encoder.encode(body).length}\n${body}\n`);
     }
@@ -213,7 +235,54 @@ export class NotesBatch {
       if (/not updating|does not contain|fast.forward/i.test(r.stderr)) throw new NotFastForward(r.stderr);
       throw new Error(`git fast-import failed: ${r.stderr.trim()}`);
     }
-    this.tip = await this.git.resolve(NOTES_REF);
+    this.tip = await this.git.resolve(this.ref);
+  }
+}
+
+/**
+ * Both notes refs as one store: reads see every record, and each new record
+ * goes to the ref the sharing policy assigns it (#9).
+ */
+export class NotesPair {
+  private constructor(
+    readonly shared: NotesBatch,
+    readonly local: NotesBatch,
+    readonly policy: SharePolicy,
+    readonly cat: CatFile,
+  ) {}
+
+  static async open(git: Git, policy: SharePolicy): Promise<NotesPair> {
+    const cat = new CatFile(git.cwd);
+    return new NotesPair(await NotesBatch.open(git, NOTES_REF, cat), await NotesBatch.open(git, LOCAL_NOTES_REF, cat), policy, cat);
+  }
+
+  async read(object: string): Promise<ArtifactRecord[]> {
+    return mergeRecords(await this.shared.read(object), await this.local.read(object));
+  }
+
+  async add(object: string, records: ArtifactRecord[]): Promise<void> {
+    const toShared = records.filter((r) => isShared(r, this.policy));
+    const toLocal = records.filter((r) => !isShared(r, this.policy));
+    if (toShared.length) await this.shared.add(object, toShared);
+    if (toLocal.length) await this.local.add(object, toLocal);
+  }
+
+  get size(): number {
+    return this.shared.size + this.local.size;
+  }
+
+  async flush(): Promise<void> {
+    await this.shared.flush();
+    await this.local.flush();
+  }
+
+  async close(): Promise<void> {
+    try {
+      await this.shared.close();
+      await this.local.close();
+    } finally {
+      await this.cat.close();
+    }
   }
 }
 

@@ -3,7 +3,7 @@ import { keyOf, parseNote, resolveIntent, type ChangeEntry, type ChangesValue } 
 import { firstLine } from "../draft.ts";
 import { CHANGES_KEY } from "../indexer.ts";
 import { openRepo, type Repo } from "../repo.ts";
-import { NOTES_REF } from "../store.ts";
+import { notesArgs } from "../store.ts";
 import { currentIdentity } from "./context.ts";
 import { intentBadge, intentView, short, type IntentView } from "./format.ts";
 
@@ -22,7 +22,7 @@ export interface LogEntry {
  */
 export async function readLog(repo: Repo, range: string[] = [], maxCount?: number): Promise<LogEntry[]> {
   if (!(await repo.git.resolve("HEAD"))) return [];
-  const gitArgs = ["log", "--no-notes", `--notes=${NOTES_REF}`, "--format=%H%x1f%s%x1f%N%x1e"];
+  const gitArgs = ["log", ...notesArgs(), "--format=%H%x1f%s%x1f%N%x1e"];
   if (maxCount !== undefined) gitArgs.push(`--max-count=${maxCount}`);
   gitArgs.push(...(range.length ? range : ["HEAD"]), "--");
 

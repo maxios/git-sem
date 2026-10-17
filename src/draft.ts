@@ -3,7 +3,7 @@ import { stagedChanges, stagedDiff } from "./changes.ts";
 import type { Engine, IntentProposal } from "./engines/index.ts";
 import { identityOf } from "./engines/index.ts";
 import type { Git } from "./git.ts";
-import { NOTES_REF } from "./store.ts";
+import { notesArgs } from "./store.ts";
 
 /** A past commit that touched the same files, with its recorded meaning. */
 export interface HistoryEntry {
@@ -64,8 +64,7 @@ export async function relatedHistory(git: Git, changes: ChangeEntry[], current?:
     await git.run([
       "log",
       `--max-count=${HISTORY_LIMIT}`,
-      "--no-notes",
-      `--notes=${NOTES_REF}`,
+      ...notesArgs(),
       "--name-only",
       "--format=%x1e%H%x1f%s%x1f%N%x1f",
       "HEAD",

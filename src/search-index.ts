@@ -8,7 +8,7 @@ import { bodyOf, extractEntities } from "./entities.ts";
 import { CHANGES_KEY, eventsIn } from "./entity-git.ts";
 import type { Git } from "./git.ts";
 import type { Repo } from "./repo.ts";
-import { NOTES_REF } from "./store.ts";
+import { ALL_NOTES_REFS } from "./store.ts";
 
 /**
  * Bumped whenever documents or embeddings change shape; an older index
@@ -71,7 +71,9 @@ export class SearchIndex {
   /** Open the index, rebuilding it first if it is missing or older than the notes. */
   static async open(repo: Repo, opts: { rebuild?: boolean } = {}): Promise<{ index: SearchIndex; rebuilt: boolean }> {
     const path = SearchIndex.pathFor(repo);
-    const tip = (await repo.git.resolve(NOTES_REF)) ?? "";
+    // Fresh while neither notes ref has moved since the index was built.
+    const tips = await Promise.all(ALL_NOTES_REFS.map((ref) => repo.git.resolve(ref)));
+    const tip = tips.map((t) => t ?? "-").join(",");
     if (opts.rebuild) rmSync(path, { force: true });
 
     let db = new Database(path, { create: true });
@@ -176,22 +178,36 @@ export function commitVector(message: string, intent: string, source?: string): 
   return normalize(v);
 }
 
+/** object id → the note blobs attached to it, across both notes refs. */
+async function noteBlobs(git: Git): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  for (const ref of ALL_NOTES_REFS) {
+    if (!(await git.resolve(ref))) continue;
+    const listing = (await git.run(["ls-tree", "-r", "-z", ref])).stdout;
+    for (const entry of listing.split("\0")) {
+      const tab = entry.indexOf("\t");
+      if (tab < 0) continue;
+      const blob = entry.slice(0, tab).split(" ")[2]!;
+      const object = entry.slice(tab + 1).replaceAll("/", "");
+      out.set(object, [...(out.get(object) ?? []), blob]);
+    }
+  }
+  return out;
+}
+
 async function build(db: Database, git: Git, tip: string): Promise<void> {
   db.run("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)");
   db.run("CREATE TABLE docs (kind TEXT, name TEXT, path TEXT, commit_id TEXT, text TEXT, vec BLOB)");
   const insert = db.prepare("INSERT INTO docs (kind, name, path, commit_id, text, vec) VALUES (?, ?, ?, ?, ?, ?)");
 
   const docs: Doc[] = [];
-  if (tip) {
-    const listing = (await git.run(["ls-tree", "-r", "-z", tip])).stdout;
+  const notes = await noteBlobs(git);
+  if (notes.size) {
     const cat = new CatFile(git.cwd);
     try {
-      for (const entry of listing.split("\0")) {
-        const tab = entry.indexOf("\t");
-        if (tab < 0) continue;
-        const blob = entry.slice(0, tab).split(" ")[2]!;
-        const object = entry.slice(tab + 1).replaceAll("/", "");
-        const records = parseNote((await cat.text(blob)) ?? "");
+      for (const [object, blobs] of notes) {
+        const texts = await Promise.all(blobs.map((b) => cat.text(b)));
+        const records = parseNote(texts.map((t) => t ?? "").join("\n"));
         const changes = records.find((r) => keyOf(r) === CHANGES_KEY)?.value as ChangesValue | undefined;
         if (!changes) continue; // not a commit note (blob facts, etc.)
 

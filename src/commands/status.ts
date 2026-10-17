@@ -5,7 +5,7 @@ import type { ProgressFile } from "../background.ts";
 import { readConfig } from "../config.ts";
 import { Queue } from "../queue.ts";
 import { openRepo } from "../repo.ts";
-import { NOTES_REF } from "../store.ts";
+import { LOCAL_NOTES_REF, NOTES_REF, readPolicy } from "../store.ts";
 
 async function readJson<T>(path: string): Promise<T | null> {
   try {
@@ -24,9 +24,15 @@ export async function statusCommand(args: string[]): Promise<number> {
   const progress = indexing ? await readJson<ProgressFile>(join(repo.semDir, "progress.json")) : null;
   const lastRun = await readJson<unknown>(join(repo.semDir, "last-run.json"));
   const notes = await repo.git.resolve(NOTES_REF);
+  const localNotes = await repo.git.resolve(LOCAL_NOTES_REF);
+  const policy = await readPolicy(repo.git);
 
   if (values.json) {
-    console.log(JSON.stringify({ pending: pending.length, indexing, progress, notes: notes ?? null, config, lastRun }, null, 2));
+    console.log(JSON.stringify(
+        { pending: pending.length, indexing, progress, notes: notes ?? null, localNotes: localNotes ?? null, policy, config, lastRun },
+        null,
+        2,
+      ));
     return 0;
   }
   const running = progress ? `running (${progress.done}/${progress.total})` : "running";
@@ -34,6 +40,8 @@ export async function statusCommand(args: string[]): Promise<number> {
   console.log(`autoindex  ${config.autoindex ? "on" : "off"}`);
   console.log(`pending    ${pending.length} commit${pending.length === 1 ? "" : "s"}`);
   console.log(`indexing   ${indexing ? running : "idle"}`);
-  console.log(`notes      ${notes ? `${NOTES_REF} @ ${notes.slice(0, 7)}` : "none yet"}`);
+  console.log(`shared     ${notes ? `${NOTES_REF} @ ${notes.slice(0, 7)}` : "none yet"}`);
+  console.log(`local      ${localNotes ? `${LOCAL_NOTES_REF} @ ${localNotes.slice(0, 7)}` : "none yet"}`);
+  console.log(`sharing    ${policy.shareDerived ? "everything (sem.share=derived)" : "only what cannot be recomputed"}`);
   return 0;
 }

@@ -156,6 +156,36 @@ decision and who made it.
 ```sh
 git sem push origin    # share refs/notes/sem
 git sem fetch origin   # receive and union theirs
+git sem prune          # keep shared notes to what can't be recomputed
+```
+
+Only what nobody else could rebuild is shared: intents from a model, an
+agent or a person, merge decisions, confirmed links and roll-ups. Everything
+git-sem can recompute from the code without a model (changes, file facts,
+entities, entity events, heuristic intents) lives in `refs/notes/sem-local`,
+which is never pushed. A fresh clone recomputes it on `git sem index`, with
+no model calls for commits a teammate already described.
+
+```
+ refs/notes/sem        shared · pushed
+   intents (model, agent, person)
+   decisions · links · roll-ups
+ refs/notes/sem-local  this clone only
+   changes · file · entities ·
+   entity-events · heuristic intents
+```
+
+Set `sem.share = derived` to share everything, as 0.2 did, if your team
+would rather skip the recompute on fresh clones.
+
+Every push applies the same rule after merging, so records that were moved
+or dropped cannot come back through a teammate's notes. To also drop the
+shared notes' old snapshots:
+
+```sh
+git sem prune --squash
+git sem push origin --force-with-lease   # refused if anyone pushed since your fetch
+git sem fetch origin --reset             # teammates: take the squashed notes
 ```
 
 ### For agents
@@ -236,12 +266,18 @@ for a local model.
 | `sem.frontier.command` | — | Tier 3 engine command (used only on request) |
 | `sem.frontier.model` | — | Tier 3 model id |
 | `sem.frontier.dailyBudget` | unlimited | Maximum Tier 3 calls per day |
+| `sem.share` | — | `derived` to also share records that can be recomputed |
 
 ## Upgrading
 
-0.2 changed how entity events are recorded (merges no longer repeat their
-branch's changes). After upgrading, run `git sem index --all` once to store
-the corrected events. Until then they are recomputed on the fly when read.
+From 0.2: run `git sem prune` once, then `git sem push`. Recomputable
+records move out of the shared notes, superseded ones are dropped, and the
+push shares the smaller notes. On a 40-commit test history with a model
+engine the shared notes went from 91 KB to 12 KB.
+
+Entity events also changed format (wrapped signatures, same-name moves).
+Run `git sem index --all` once to store the new events; until then they
+are recomputed on the fly when read.
 
 ## Performance
 

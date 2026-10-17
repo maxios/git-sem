@@ -7,7 +7,8 @@ import {
   type ChangesValue,
   type FileValue,
 } from "./artifacts.ts";
-import { NotesBatch, resolveCommits } from "./batch.ts";
+import { NotesPair, resolveCommits } from "./batch.ts";
+import { readPolicy } from "./store.ts";
 import { commitChanges, commitDiff, isRegularFile } from "./changes.ts";
 import { identityOf, type Engine } from "./engines/index.ts";
 import { extractEntities, languageOf } from "./entities.ts";
@@ -120,7 +121,7 @@ export class Indexer {
     }
 
     const metas = await readCommitMeta(this.git, ids);
-    const notes = await NotesBatch.open(this.git);
+    const notes = await NotesPair.open(this.git, await readPolicy(this.git));
     try {
       for (const [i, id] of ids.entries()) {
         const meta = metas.get(id);
@@ -144,7 +145,7 @@ export class Indexer {
     return stats;
   }
 
-  private async indexCommit(meta: CommitMeta, notes: NotesBatch, stats: IndexStats): Promise<void> {
+  private async indexCommit(meta: CommitMeta, notes: NotesPair, stats: IndexStats): Promise<void> {
     const existing = await notes.read(meta.hash);
     const fresh: ArtifactRecord[] = [];
 
@@ -255,7 +256,7 @@ export class Indexer {
   }
 
   /** Returns true if the blob already had a file artifact (reused), false if it was computed now. */
-  private async ensureFile(blob: string, path: string, notes: NotesBatch): Promise<boolean> {
+  private async ensureFile(blob: string, path: string, notes: NotesPair): Promise<boolean> {
     const existing = await notes.read(blob);
     const hasFile = existing.some((r) => keyOf(r) === FILE_KEY);
     const wantsEntities = languageOf(path) !== undefined && !existing.some((r) => keyOf(r) === ENTITIES_KEY);

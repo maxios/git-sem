@@ -154,8 +154,9 @@ Displayed intent is resolved in this order:
 ## Storage and sharing
 
 ```
-  refs/notes/sem                 source of truth
-  refs/notes/sem-remotes/<r>     last fetched copy of <r>
+  refs/notes/sem                 shared: what cannot be recomputed
+  refs/notes/sem-local           local: recomputable, never pushed
+  refs/notes/sem-remotes/<r>     last fetched or pushed copy of <r>
   .git/sem/                      local only
     queue, queue.processing
     index.lock, last-run.json
@@ -168,6 +169,20 @@ Records are written with `hash-object` + `notes add -C`, so git stores the
 exact bytes. Notes merge with `cat_sort_uniq`: concatenate, sort, deduplicate.
 Because every record is a single line, two teammates' notes always union
 without conflict, and readers deduplicate by key.
+
+Which ref a record goes to is decided in one place (`src/sharing.ts`):
+records git-sem can recompute without a model (changes, file, entities,
+entity-events, heuristic intents) are local unless `sem.share = derived`.
+Readers always see both refs: `git log` takes both with two `--notes`
+options, and the indexer and search index read them as one store.
+
+A union merge cannot express deletion, so the same rule runs before every
+push: after merging the remote, recomputable records move to the local ref
+and superseded ones (older formats once the current one exists, heuristic
+intents once a better intent exists) are dropped. `git sem prune` runs it
+over both refs on demand and squashes the local ref's history;
+`--squash` also squashes the shared ref, which only
+`push --force-with-lease` (guarded by the last fetched value) can share.
 
 `git sem push` fetches and merges before pushing and retries if it races
 another pusher.

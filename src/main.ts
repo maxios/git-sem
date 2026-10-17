@@ -5,6 +5,7 @@ import { initCommand } from "./commands/init.ts";
 import { intentCommand } from "./commands/intent.ts";
 import { logCommand } from "./commands/log.ts";
 import { mcpCommand } from "./commands/mcp.ts";
+import { pruneCommand } from "./commands/prune.ts";
 import { checkCommand, mergeViewCommand, resolveCommand } from "./commands/merge.ts";
 import { rebuildCommand, searchCommand, similarCommand } from "./commands/search.ts";
 import { showCommand } from "./commands/show.ts";
@@ -78,8 +79,13 @@ merging (you decide; nothing is merged for you)
     --accept               write the last proposal (does not stage it)
 
 team
-  push [<remote>]          share semantics (refs/notes/sem)
+  push [<remote>]          share refs/notes/sem (intents, decisions, links)
+    --force-with-lease     replace the remote's notes (after prune --squash)
   fetch [<remote>]         receive and union a remote's semantics
+    --reset                replace yours with the remote's (after a squash)
+  prune                    keep shared notes to what cannot be recomputed
+    --dry-run              show what would move or be dropped
+    --squash               also squash the shared notes' history
 
 All read and write commands accept --json.`;
 
@@ -97,6 +103,7 @@ const COMMANDS: Record<string, Command> = {
   resolve: resolveCommand,
   check: checkCommand,
   mcp: mcpCommand,
+  prune: pruneCommand,
   index: indexCommand,
   log: logCommand,
   show: showCommand,

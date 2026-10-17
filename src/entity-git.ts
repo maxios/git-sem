@@ -3,14 +3,10 @@ import type { CatFile } from "./batch.ts";
 import { commitChanges } from "./changes.ts";
 import { diffEntities, extractEntities, languageOf, type Entity, type EntityEvent, type FileVersion } from "./entities.ts";
 import type { Git } from "./git.ts";
+import { notesArgs } from "./store.ts";
+import { ENTITIES_VERSION } from "./versions.ts";
 
-/**
- * v2: merges record only their own changes (#2); events carry export status
- * for language-aware checks (#3); Tier 1 links need enough real tokens (#4).
- * v3: wrapped signatures are extracted (#12); same-name moves link (#11).
- * Older records are ignored and recomputed when read.
- */
-export const ENTITIES_VERSION = "entities/v3";
+export { ENTITIES_VERSION };
 export const ENTITY_EVENTS_KEY = `entity-events:derived:core:none:${ENTITIES_VERSION}`;
 export const ENTITIES_KEY = `entities:derived:core:none:${ENTITIES_VERSION}`;
 export const CHANGES_KEY = "changes:derived:core:none:changes/v1";
@@ -151,8 +147,7 @@ export async function commitsWithNotes(git: Git, range: string[], extra: string[
     await git.run([
       "log",
       ...extra,
-      "--no-notes",
-      "--notes=refs/notes/sem",
+      ...notesArgs(),
       "--format=%H%x1f%P%x1f%s%x1f%ce%x1f%N%x1e",
       ...range,
       "--",
