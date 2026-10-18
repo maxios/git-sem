@@ -249,8 +249,22 @@ The program receives one JSON object on stdin with `protocol: 1` and a
 | `contradictions` | intents of both sides, Tier 0 `warnings[]` | a review |
 
 It prints `{"text": "...", "confidence": 0.0-1.0, "questions": ["..."]}`
-(`questions` optional). See [`examples/engines/ollama.ts`](examples/engines/ollama.ts)
-for a local model.
+(`questions` optional). For `resolve`, `text` is the whole file and is kept
+exactly as returned.
+
+[`examples/engines/ollama.ts`](examples/engines/ollama.ts) answers all four
+tasks with a local model. It constrains the answer with a JSON schema, and it
+refuses a conflict too large for the context window instead of cutting it.
+Use it as the intent engine, as the Tier 3 engine, or both:
+
+```sh
+git config sem.engine command
+git config sem.command "bun /path/to/git-sem/examples/engines/ollama.ts"
+git config sem.model "llama3.2:3b"
+
+git config sem.frontier.command "bun /path/to/git-sem/examples/engines/ollama.ts"
+git config sem.frontier.model "qwen2.5:14b"
+```
 
 ## Configuration
 
